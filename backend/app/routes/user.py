@@ -102,7 +102,9 @@ def get_my_stats():
     for (tags_json,) in all_tags:
         if isinstance(tags_json, list):
             for tag in tags_json:
-                tag_counter[tag] = tag_counter.get(tag, 0) + 1
+                # Rows stored before tags were validated may hold lists/dicts.
+                if isinstance(tag, str):
+                    tag_counter[tag] = tag_counter.get(tag, 0) + 1
     top_tags = [t for t, _ in sorted(tag_counter.items(), key=lambda x: x[1], reverse=True)][:5]
 
     return jsonify({

@@ -141,13 +141,116 @@ class TestCreateCard:
         created = Card.query.filter_by(card_id=resp.get_json()["card_id"]).first()
         assert created.difficulty is None
 
-    def test_create_card_truncates_concept_over_120_chars(self, client, auth_headers, session_and_question):
+
+# Over-the-cap input is rejected, never silently truncated: (field, cap).
+TEXT_CAPS = [
+    ("concept", 120),
+    ("definition", 2000),
+    ("explanation", 2000),
+    ("use_case", 2000),
+    ("avoid_when", 2000),
+    ("code", 10000),
+]
+
+
+class TestCreateCardBounds:
+    @pytest.mark.parametrize("field,cap", TEXT_CAPS)
+    def test_text_field_over_its_cap_returns_400_and_creates_nothing(
+        self, client, auth_headers, session_and_question, field, cap
+    ):
         payload = _valid_card_payload(**session_and_question)
-        payload["concept"] = "x" * 200
+        payload[field] = "x" * (cap + 1)
+        resp = client.post("/cards/", json=payload, headers=auth_headers)
+        assert resp.status_code == 400
+        assert field in resp.get_json()["msg"]
+        assert str(cap) in resp.get_json()["msg"]
+        assert Card.query.count() == 0
+
+    @pytest.mark.parametrize("field,cap", TEXT_CAPS)
+    def test_text_field_of_exactly_its_cap_is_stored_whole(
+        self, client, auth_headers, session_and_question, field, cap
+    ):
+        payload = _valid_card_payload(**session_and_question)
+        payload[field] = "x" * cap
         resp = client.post("/cards/", json=payload, headers=auth_headers)
         assert resp.status_code == 201
         created = Card.query.filter_by(card_id=resp.get_json()["card_id"]).first()
-        assert len(created.concept) == 120
+        assert getattr(created, field) == "x" * cap
+
+    def test_cap_is_checked_after_strip(self, client, auth_headers, session_and_question):
+        payload = _valid_card_payload(**session_and_question)
+        payload["concept"] = "  " + "x" * 120 + "  "
+        assert client.post("/cards/", json=payload, headers=auth_headers).status_code == 201
+
+    @pytest.mark.parametrize("field", [f for f, _ in TEXT_CAPS])
+    @pytest.mark.parametrize("value", [123, ["x"], {"a": 1}])
+    def test_non_string_text_field_returns_400(
+        self, client, auth_headers, session_and_question, field, value
+    ):
+        payload = _valid_card_payload(**session_and_question)
+        payload[field] = value
+        assert client.post("/cards/", json=payload, headers=auth_headers).status_code == 400
+
+    def test_ten_tags_are_accepted_and_each_is_stripped(self, client, auth_headers, session_and_question):
+        payload = _valid_card_payload(**session_and_question)
+        payload["tags"] = [f" tag{i} " for i in range(10)]
+        resp = client.post("/cards/", json=payload, headers=auth_headers)
+        assert resp.status_code == 201
+        created = Card.query.filter_by(card_id=resp.get_json()["card_id"]).first()
+        assert created.tags == [f"tag{i}" for i in range(10)]
+
+    def test_eleven_tags_return_400(self, client, auth_headers, session_and_question):
+        payload = _valid_card_payload(**session_and_question)
+        payload["tags"] = [f"tag{i}" for i in range(11)]
+        resp = client.post("/cards/", json=payload, headers=auth_headers)
+        assert resp.status_code == 400
+        assert "tags" in resp.get_json()["msg"]
+
+    def test_tag_of_exactly_40_characters_is_accepted(self, client, auth_headers, session_and_question):
+        payload = _valid_card_payload(**session_and_question)
+        payload["tags"] = ["t" * 40]
+        assert client.post("/cards/", json=payload, headers=auth_headers).status_code == 201
+
+    def test_tag_over_40_characters_returns_400(self, client, auth_headers, session_and_question):
+        payload = _valid_card_payload(**session_and_question)
+        payload["tags"] = ["t" * 41]
+        assert client.post("/cards/", json=payload, headers=auth_headers).status_code == 400
+
+    @pytest.mark.parametrize(
+        "tags",
+        [
+            [["nested"]],
+            [{"k": "v"}],
+            [5],
+            [None],
+            [""],
+            ["   "],
+            "javascript",
+            {"a": 1},
+            5,
+        ],
+    )
+    def test_invalid_tags_return_400_and_store_nothing(self, client, auth_headers, session_and_question, tags):
+        payload = _valid_card_payload(**session_and_question)
+        payload["tags"] = tags
+        resp = client.post("/cards/", json=payload, headers=auth_headers)
+        assert resp.status_code == 400
+        assert Card.query.count() == 0
+
+    @pytest.mark.parametrize("tags", [None, []])
+    def test_null_or_empty_tags_are_accepted(self, client, auth_headers, session_and_question, tags):
+        payload = _valid_card_payload(**session_and_question)
+        payload["tags"] = tags
+        assert client.post("/cards/", json=payload, headers=auth_headers).status_code == 201
+
+    def test_omitted_tags_are_accepted(self, client, auth_headers, session_and_question):
+        payload = _valid_card_payload(**session_and_question)
+        del payload["tags"]
+        assert client.post("/cards/", json=payload, headers=auth_headers).status_code == 201
+
+    def test_non_object_body_returns_400(self, client, auth_headers):
+        resp = client.post("/cards/", data="[1]", headers=auth_headers)
+        assert resp.status_code == 400
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +350,74 @@ class TestUpdateCard:
         resp = client.patch(f"/cards/{card_id}", json={"code_language": ""}, headers=auth_headers)
         assert resp.status_code == 200
         assert resp.get_json()["code_language"] == "javascript"
+
+    @pytest.mark.parametrize("field,cap", TEXT_CAPS)
+    def test_patch_text_field_over_its_cap_returns_400_and_keeps_the_card(
+        self, client, auth_headers, session_and_question, field, cap
+    ):
+        card_id = self._create_card(client, auth_headers, session_and_question)
+        before = client.get("/cards/", headers=auth_headers).get_json()[0]
+        resp = client.patch(f"/cards/{card_id}", json={field: "x" * (cap + 1)}, headers=auth_headers)
+        assert resp.status_code == 400
+        assert field in resp.get_json()["msg"]
+        assert client.get("/cards/", headers=auth_headers).get_json()[0] == before
+
+    @pytest.mark.parametrize("field,cap", TEXT_CAPS)
+    def test_patch_text_field_of_exactly_its_cap_is_stored_whole(
+        self, client, auth_headers, session_and_question, field, cap
+    ):
+        card_id = self._create_card(client, auth_headers, session_and_question)
+        resp = client.patch(f"/cards/{card_id}", json={field: "x" * cap}, headers=auth_headers)
+        assert resp.status_code == 200
+        assert resp.get_json()[field] == "x" * cap
+
+    @pytest.mark.parametrize("field", [f for f, _ in TEXT_CAPS])
+    @pytest.mark.parametrize("value", [123, ["x"], {"a": 1}])
+    def test_patch_non_string_text_field_returns_400(
+        self, client, auth_headers, session_and_question, field, value
+    ):
+        card_id = self._create_card(client, auth_headers, session_and_question)
+        resp = client.patch(f"/cards/{card_id}", json={field: value}, headers=auth_headers)
+        assert resp.status_code == 400
+
+    def test_patch_ten_tags_of_40_characters_are_accepted(self, client, auth_headers, session_and_question):
+        card_id = self._create_card(client, auth_headers, session_and_question)
+        tags = [str(i) * 40 for i in range(10)]
+        resp = client.patch(f"/cards/{card_id}", json={"tags": [t[:40] for t in tags]}, headers=auth_headers)
+        assert resp.status_code == 200
+        assert resp.get_json()["tags"] == [t[:40] for t in tags]
+
+    @pytest.mark.parametrize(
+        "tags",
+        [
+            [f"tag{i}" for i in range(11)],
+            ["t" * 41],
+            [["nested"]],
+            [{"k": "v"}],
+            [5],
+            [""],
+            "javascript",
+            {"a": 1},
+        ],
+    )
+    def test_patch_invalid_tags_return_400_and_keep_the_stored_ones(
+        self, client, auth_headers, session_and_question, tags
+    ):
+        card_id = self._create_card(client, auth_headers, session_and_question)
+        resp = client.patch(f"/cards/{card_id}", json={"tags": tags}, headers=auth_headers)
+        assert resp.status_code == 400
+        assert client.get("/cards/", headers=auth_headers).get_json()[0]["tags"] == ["javascript", "closures"]
+
+    def test_patch_null_tags_clears_them(self, client, auth_headers, session_and_question):
+        card_id = self._create_card(client, auth_headers, session_and_question)
+        resp = client.patch(f"/cards/{card_id}", json={"tags": None}, headers=auth_headers)
+        assert resp.status_code == 200
+        assert resp.get_json()["tags"] == []
+
+    def test_patch_non_object_body_returns_400(self, client, auth_headers, session_and_question):
+        card_id = self._create_card(client, auth_headers, session_and_question)
+        resp = client.patch(f"/cards/{card_id}", data="[1]", headers=auth_headers)
+        assert resp.status_code == 400
 
     def test_update_nonexistent_card_returns_404(self, client, auth_headers):
         resp = client.patch("/cards/999999", json={"concept": "x"}, headers=auth_headers)
