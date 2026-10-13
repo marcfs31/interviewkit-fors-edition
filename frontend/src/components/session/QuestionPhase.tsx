@@ -57,10 +57,11 @@ export default function QuestionPhase({
         <span className="text-xs text-muted-foreground mr-2">
           {isCodeMode ? "Editor de código" : "Texto"}
         </span>
-        <div className="isolate flex rounded-lg border border-border bg-muted p-0.5">
+        <div role="group" aria-label="Modo de respuesta" className="isolate flex rounded-lg border border-border bg-muted p-0.5">
           <button
             type="button"
             onClick={() => setIsCodeMode(false)}
+            aria-pressed={!isCodeMode}
             className={cn(
               "relative flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
               !isCodeMode ? "text-foreground" : "text-muted-foreground hover:text-foreground"
@@ -79,6 +80,7 @@ export default function QuestionPhase({
           <button
             type="button"
             onClick={() => setIsCodeMode(true)}
+            aria-pressed={isCodeMode}
             className={cn(
               "relative flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
               isCodeMode ? "text-foreground" : "text-muted-foreground hover:text-foreground"

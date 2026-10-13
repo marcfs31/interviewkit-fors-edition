@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { useRouter, usePathname } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
 import { Button } from "@/components/ui/button"
@@ -55,13 +56,13 @@ function Navbar() {
     <header className="fixed top-0 inset-x-0 z-50 border-b-2 border-foreground bg-background">
       <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-6">
 
-        <button
-          onClick={() => router.push("/")}
+        <Link
+          href="/"
           aria-label="InterviewKit, ir al inicio"
           className="shrink-0 cursor-pointer select-none outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <Logo />
-        </button>
+        </Link>
 
         {!user && (
           <nav aria-label="Secciones" className="hidden md:flex items-center gap-7 text-sm">
@@ -80,25 +81,27 @@ function Navbar() {
               return (
                 <Button
                   key={path}
+                  asChild
                   variant="ghost"
                   size="sm"
-                  onClick={() => router.push(path)}
                   className={cn(
                     "relative gap-2 text-sm",
                     active ? "text-primary hover:bg-transparent" : "text-foreground"
                   )}
                 >
-                  {active && (
-                    <motion.span
-                      layoutId="navActiveTab"
-                      className="absolute inset-0 bg-accent"
-                      transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                    />
-                  )}
-                  <span className="relative z-10 flex items-center gap-2">
-                    <Icon className="size-4" />
-                    {label}
-                  </span>
+                  <Link href={path} aria-current={active ? "page" : undefined}>
+                    {active && (
+                      <motion.span
+                        layoutId="navActiveTab"
+                        className="absolute inset-0 bg-accent"
+                        transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                      />
+                    )}
+                    <span className="relative z-10 flex items-center gap-2">
+                      <Icon className="size-4" />
+                      {label}
+                    </span>
+                  </Link>
                 </Button>
               )
             })}
@@ -139,14 +142,18 @@ function Navbar() {
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   {navLinks.map(({ path, label, icon: Icon }) => (
-                    <DropdownMenuItem key={path} onClick={() => router.push(path)}>
-                      <Icon className="mr-2 size-4" />
-                      {label}
+                    <DropdownMenuItem key={path} asChild>
+                      <Link href={path} aria-current={isActive(path) ? "page" : undefined}>
+                        <Icon className="mr-2 size-4" />
+                        {label}
+                      </Link>
                     </DropdownMenuItem>
                   ))}
-                  <DropdownMenuItem onClick={() => router.push(profileLink.path)}>
-                    <profileLink.icon className="mr-2 size-4" />
-                    {profileLink.label}
+                  <DropdownMenuItem asChild>
+                    <Link href={profileLink.path} aria-current={isActive(profileLink.path) ? "page" : undefined}>
+                      <profileLink.icon className="mr-2 size-4" />
+                      {profileLink.label}
+                    </Link>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
@@ -170,11 +177,11 @@ function Navbar() {
             </>
           ) : (
             <>
-              <Button variant="ghost" size="lg" onClick={() => router.push("/login")} className="text-sm">
-                Iniciar sesión
+              <Button asChild variant="ghost" size="lg" className="text-sm">
+                <Link href="/login">Iniciar sesión</Link>
               </Button>
-              <Button size="lg" onClick={() => router.push("/register")} className="text-sm font-semibold">
-                Empezar
+              <Button asChild size="lg" className="text-sm font-semibold">
+                <Link href="/register">Empezar</Link>
               </Button>
             </>
           )}
@@ -205,26 +212,30 @@ function Navbar() {
               </div>
             </div>
             {navLinks.map(({ path, label, icon: Icon }) => (
-              <button
+              <Link
                 key={path}
-                onClick={() => { router.push(path); setMobileMenuOpen(false) }}
+                href={path}
+                onClick={() => setMobileMenuOpen(false)}
+                aria-current={isActive(path) ? "page" : undefined}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors cursor-pointer ${
                   isActive(path) ? "bg-primary/10 text-primary" : "hover:bg-muted text-foreground"
                 }`}
               >
                 <Icon className="size-4" />
                 {label}
-              </button>
+              </Link>
             ))}
-            <button
-              onClick={() => { router.push(profileLink.path); setMobileMenuOpen(false) }}
+            <Link
+              href={profileLink.path}
+              onClick={() => setMobileMenuOpen(false)}
+              aria-current={isActive(profileLink.path) ? "page" : undefined}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors cursor-pointer ${
                 isActive(profileLink.path) ? "bg-primary/10 text-primary" : "hover:bg-muted text-foreground"
               }`}
             >
               <profileLink.icon className="size-4" />
               {profileLink.label}
-            </button>
+            </Link>
             <button
               onClick={() => { logout(); router.push("/"); setMobileMenuOpen(false) }}
               className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"

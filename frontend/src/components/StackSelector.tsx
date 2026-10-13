@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useId, useRef, useState } from "react"
 import { Button } from "./ui/button"
 import { Card, CardContent, CardFooter } from "./ui/card"
 import { motion, AnimatePresence } from "framer-motion"
@@ -35,6 +35,25 @@ interface StackSelectorProps {
 function StackSelector({ onSubmit, stacks }: StackSelectorProps) {
   const [select, setSelect] = useState<Selection>({ rol: "", stack: "", topic: "", level: "" })
   const [step, setStep] = useState(0)
+  const uid = useId()
+  // The step content is replaced, so the focused element disappears; the new
+  // heading takes focus once it mounts (AnimatePresence mounts it after the exit).
+  const focusHeadingPending = useRef(false)
+
+  const goToStep = (next: number) => {
+    if (next === step) return
+    focusHeadingPending.current = true
+    setStep(next)
+  }
+
+  const headingRef = (el: HTMLHeadingElement | null) => {
+    if (el && focusHeadingPending.current) {
+      focusHeadingPending.current = false
+      el.focus()
+    }
+  }
+
+  const headingId = (idx: number) => `${uid}-step-${idx}`
 
   // Selecting a step's option saves it and advances; changing an earlier step
   // clears the steps that depend on it
@@ -43,7 +62,7 @@ function StackSelector({ onSubmit, stacks }: StackSelectorProps) {
     if (type === "rol") { newSelect.stack = ""; newSelect.topic = ""; newSelect.level = "" }
     if (type === "stack") { newSelect.topic = ""; newSelect.level = "" }
     setSelect(newSelect)
-    if (step < 3) setStep(step + 1)
+    if (step < 3) goToStep(step + 1)
   }
 
   const isCompleted = (idx: number) => select[steps[idx].key] !== ""
@@ -51,7 +70,11 @@ function StackSelector({ onSubmit, stacks }: StackSelectorProps) {
   const renderOptions = (items: string[], type: keyof Selection, selectedValue: string, iconMap?: Record<string, LucideIcon>) => {
     const cols = type === "level" ? "grid-cols-3" : "grid-cols-2 sm:grid-cols-2"
     return (
-      <div className={cn("grid gap-3 sm:gap-4", cols)}>
+      <div
+        role="group"
+        aria-labelledby={headingId(steps.findIndex((s) => s.key === type))}
+        className={cn("grid gap-3 sm:gap-4", cols)}
+      >
         {items.map((item) => {
           const selected = selectedValue === item
           const Icon = iconMap?.[item]
@@ -60,6 +83,7 @@ function StackSelector({ onSubmit, stacks }: StackSelectorProps) {
               key={item}
               type="button"
               onClick={() => handleSelect(type, item)}
+              aria-pressed={selected}
               className={cn(
                 "relative flex flex-col items-start gap-3 rounded-md border p-5 text-left transition-[transform,background-color,border-color] duration-150 ease-out sm:p-6",
                 "hover:border-foreground hover:bg-secondary active:scale-[0.985]",
@@ -92,7 +116,7 @@ function StackSelector({ onSubmit, stacks }: StackSelectorProps) {
             <button
               key={s.key}
               type="button"
-              onClick={() => { if (reachable) setStep(idx) }}
+              onClick={() => { if (reachable) goToStep(idx) }}
               disabled={!reachable}
               aria-current={current ? "step" : undefined}
               className="group text-left disabled:cursor-not-allowed"
@@ -133,7 +157,7 @@ function StackSelector({ onSubmit, stacks }: StackSelectorProps) {
                 transition={{ duration: 0.25 }}
               >
                 <div className="mb-8">
-                  <h2 className="display text-3xl font-extrabold">{steps[0].question}</h2>
+                  <h2 id={headingId(0)} ref={headingRef} tabIndex={-1} className="display text-3xl font-extrabold">{steps[0].question}</h2>
                   <p className="mt-2 text-base text-muted-foreground">Elige el área que más te interese</p>
                 </div>
                 {renderOptions(Object.keys(stacks.rol), "rol", select.rol, roleIcons)}
@@ -149,7 +173,7 @@ function StackSelector({ onSubmit, stacks }: StackSelectorProps) {
                 transition={{ duration: 0.25 }}
               >
                 <div className="mb-8">
-                  <h2 className="display text-3xl font-extrabold">{steps[1].question}</h2>
+                  <h2 id={headingId(1)} ref={headingRef} tabIndex={-1} className="display text-3xl font-extrabold">{steps[1].question}</h2>
                   <p className="mt-2 text-base text-muted-foreground">
                     Rol: <span className="font-medium text-foreground">{select.rol}</span>
                   </p>
@@ -167,7 +191,7 @@ function StackSelector({ onSubmit, stacks }: StackSelectorProps) {
                 transition={{ duration: 0.25 }}
               >
                 <div className="mb-8">
-                  <h2 className="display text-3xl font-extrabold">{steps[2].question}</h2>
+                  <h2 id={headingId(2)} ref={headingRef} tabIndex={-1} className="display text-3xl font-extrabold">{steps[2].question}</h2>
                   <p className="mt-2 text-base text-muted-foreground">
                     {select.rol} · <span className="font-medium text-foreground">{select.stack}</span>
                   </p>
@@ -185,7 +209,7 @@ function StackSelector({ onSubmit, stacks }: StackSelectorProps) {
                 transition={{ duration: 0.25 }}
               >
                 <div className="mb-8">
-                  <h2 className="display text-3xl font-extrabold">{steps[3].question}</h2>
+                  <h2 id={headingId(3)} ref={headingRef} tabIndex={-1} className="display text-3xl font-extrabold">{steps[3].question}</h2>
                   <p className="mt-2 text-base text-muted-foreground">
                     {select.stack} · <span className="font-medium text-foreground">{select.topic}</span>
                   </p>
@@ -199,7 +223,7 @@ function StackSelector({ onSubmit, stacks }: StackSelectorProps) {
         {(step > 0 || select.level) && (
           <CardFooter className="flex items-center justify-between p-5 sm:p-8 md:p-10 pt-0">
             {step > 0 ? (
-              <Button variant="ghost" onClick={() => setStep(step - 1)} className="gap-2 text-base">
+              <Button variant="ghost" onClick={() => goToStep(step - 1)} className="gap-2 text-base">
                 <ChevronLeft className="size-5" />
                 Atrás
               </Button>
