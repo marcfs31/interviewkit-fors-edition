@@ -13,18 +13,17 @@ import { ChangeUsernameDialog } from '@/components/profile/ChangeUsernameDialog'
 import { PageContainer } from "@/components/layout/PageContainer";
 import { PageHeader } from "@/components/layout/PageHeader";
 import StatCards from "@/components/stats/StatCards";
+import StatsUnavailable from "@/components/stats/StatsUnavailable";
 import { containerVariants, itemVariants } from "@/components/layout/motion-variants";
 
 
 export default function ProfilePage() {
-    const { user, stats } = useAuth();
+    const { user, stats, statsStatus, refreshStats } = useAuth();
     const [isOpenChangeUserName, setIsOpenChangeUserName] = useState(false);
 
-    const progressPercent = stats.xp_per_level > 0
+    const progressPercent = stats && stats.xp_per_level > 0
         ? Math.min(100, (stats.progress_in_level / stats.xp_per_level) * 100)
         : 0;
-
-    const xpToNextLevel = stats.xp_to_next_level || 0;
 
     return (
         <PageContainer max="5xl">
@@ -56,20 +55,22 @@ export default function ProfilePage() {
                                 </button>
                             </div>
 
-                            <div className="w-full mt-6">
-                                <div className="h-2 w-full bg-muted overflow-hidden">
-                                    <motion.div
-                                        className="h-full bg-primary"
-                                        initial={{ width: 0 }}
-                                        animate={{ width: `${progressPercent}%` }}
-                                        transition={{ duration: 1, ease: "easeOut", delay: 0.4 }}
-                                    />
+                            {stats && (
+                                <div className="w-full mt-6">
+                                    <div className="h-2 w-full bg-muted overflow-hidden">
+                                        <motion.div
+                                            className="h-full bg-primary"
+                                            initial={{ width: 0 }}
+                                            animate={{ width: `${progressPercent}%` }}
+                                            transition={{ duration: 1, ease: "easeOut", delay: 0.4 }}
+                                        />
+                                    </div>
+                                    <div className="mt-2 flex justify-between font-mono text-xs text-muted-foreground">
+                                        <span>{stats.progress_in_level} / {stats.xp_per_level || '—'} XP</span>
+                                        <span>{stats.xp_to_next_level} XP al Nv {stats.level + 1}</span>
+                                    </div>
                                 </div>
-                                <div className="mt-2 flex justify-between font-mono text-xs text-muted-foreground">
-                                    <span>{stats.progress_in_level} / {stats.xp_per_level || '—'} XP</span>
-                                    <span>{xpToNextLevel} XP al Nv {stats.level + 1}</span>
-                                </div>
-                            </div>
+                            )}
                         </CardContent>
                     </Card>
                 </motion.div>
@@ -78,7 +79,11 @@ export default function ProfilePage() {
                     <h2 className="font-mono text-xs text-muted-foreground">
                         Tu progreso
                     </h2>
-                    <StatCards stats={stats} sessionsCount={stats.sessions_count} />
+                    {stats ? (
+                        <StatCards stats={stats} sessionsCount={stats.sessions_count} />
+                    ) : (
+                        <StatsUnavailable status={statsStatus === "error" ? "error" : "loading"} onRetry={refreshStats} />
+                    )}
                 </motion.div>
             </motion.div>
         </PageContainer>

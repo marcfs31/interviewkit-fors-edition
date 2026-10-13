@@ -15,9 +15,13 @@ import { logoutUser } from "@/services/authService";
 import { setOnUnauthorized } from "@/services/httpClient";
 import type { StatsResponse } from "@/services/sessionService";
 
+export type StatsStatus = "loading" | "ok" | "error";
+
 interface AuthContextValue {
   user: string | null;
-  stats: StatsResponse;
+  // null means "unknown": still loading or the last fetch failed (see statsStatus)
+  stats: StatsResponse | null;
+  statsStatus: StatsStatus;
   initialized: boolean;
   login: (logUser: string, token?: string) => void;
   loginFromOAuth: () => Promise<void>;
@@ -28,22 +32,10 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-const DEFAULT_STATS: StatsResponse = {
-  total_xp: 0,
-  level: 1,
-  xp_to_next_level: 0,
-  progress_in_level: 0,
-  xp_per_level: 0,
-  results_summary: { correct: 0, partially_correct: 0, incorrect: 0 },
-  stacks_stats: [],
-  sessions_count: 0,
-  recent_sessions: [],
-  cards_summary: { total: 0, top_tags: [] },
-};
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<string | null>(null);
-  const [stats, setStats] = useState(DEFAULT_STATS);
+  const [stats, setStats] = useState<StatsResponse | null>(null);
+  const [statsStatus, setStatsStatus] = useState<StatsStatus>("loading");
   const [initialized, setInitialized] = useState(false);
   const refreshingRef = useRef(false);
   // Marcamos un login en curso para que un 401 transitorio (p. ej. el
@@ -57,28 +49,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem("user");
       localStorage.removeItem("access_token");
       setUser(null);
-      setStats(DEFAULT_STATS);
+      setStats(null);
+      setStatsStatus("loading");
     });
   }, []);
 
   const refreshStats = useCallback(async () => {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
+    // Keep showing the last good value while re-fetching; only a first load
+    // or a retry after an error goes back to "loading".
+    setStatsStatus((prev) => (prev === "ok" ? prev : "loading"));
     try {
-      const data = await getMyStats();
-      setStats({
-        total_xp: data.total_xp ?? 0,
-        level: data.level ?? 1,
-        xp_to_next_level: data.xp_to_next_level ?? 0,
-        progress_in_level: data.progress_in_level ?? 0,
-        xp_per_level: data.xp_per_level ?? 0,
-        results_summary: data.results_summary ?? DEFAULT_STATS.results_summary,
-        stacks_stats: data.stacks_stats ?? DEFAULT_STATS.stacks_stats,
-        sessions_count: data.sessions_count ?? DEFAULT_STATS.sessions_count,
-        recent_sessions: data.recent_sessions ?? DEFAULT_STATS.recent_sessions,
-        cards_summary: data.cards_summary ?? DEFAULT_STATS.cards_summary,
-      });
+      setStats(await getMyStats());
+      setStatsStatus("ok");
     } catch {
+      setStats(null);
+      setStatsStatus("error");
     } finally {
       refreshingRef.current = false;
     }
@@ -153,7 +140,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem("user");
     localStorage.removeItem("access_token");
     setUser(null);
-    setStats(DEFAULT_STATS);
+    setStats(null);
+    setStatsStatus("loading");
   }
 
   return (
@@ -161,6 +149,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         stats,
+        statsStatus,
         initialized,
         login,
         loginFromOAuth,
