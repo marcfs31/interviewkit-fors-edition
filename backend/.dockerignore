@@ -9,3 +9,11 @@ env
 .venv
 *.md
 *.txt~
+tests/
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+venv*/
+__pycache__/
