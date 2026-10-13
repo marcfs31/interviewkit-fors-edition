@@ -2,10 +2,12 @@
 Tests for /health, the logging setup and the opt-in Sentry init.
 """
 import logging
+import re
 
 import pytest
 
 from app import _configure_logging, _init_sentry
+from app.version import __version__
 
 
 class TestHealth:
@@ -13,7 +15,10 @@ class TestHealth:
         resp = client.get("/health")
 
         assert resp.status_code == 200
-        assert resp.get_json() == {"status": "ok"}
+        assert resp.get_json() == {"status": "ok", "version": __version__}
+
+    def test_version_follows_semver(self):
+        assert re.fullmatch(r"\d+\.\d+\.\d+", __version__)
 
     def test_is_not_rate_limited(self, client):
         assert all(client.get("/health").status_code == 200 for _ in range(60))
@@ -29,6 +34,7 @@ class TestHealth:
 
         assert resp.status_code == 503
         assert resp.get_json() == {"status": "unavailable"}
+        assert "version" not in resp.get_json()
         assert "secret-host" not in resp.get_data(as_text=True)
         assert "database is not reachable" in caplog.text
 
