@@ -57,3 +57,22 @@ class TestDbStatus:
         """No Authorization header -> rejected before any DB work."""
         resp = client.get("/debug/db")
         assert resp.status_code == 401
+
+
+class TestDbStatusErrors:
+    def test_failure_returns_generic_message_without_exception_text(
+        self, client, auth_headers, monkeypatch
+    ):
+        """A failing query must be logged server-side, never echoed to the
+        client (the message could carry connection strings or SQL)."""
+        secret = "FATAL: password authentication failed for user admin"
+        monkeypatch.setattr(
+            "app.routes.debug.db.session.execute",
+            MagicMock(side_effect=RuntimeError(secret)),
+        )
+
+        resp = client.get("/debug/db", headers=_headers_without_user(auth_headers))
+
+        assert resp.status_code == 500
+        assert secret not in resp.get_data(as_text=True)
+        assert resp.get_json() == {"error": "No se pudo consultar la base de datos"}

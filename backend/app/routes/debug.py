@@ -1,7 +1,11 @@
+import logging
+
 from flask import Blueprint, jsonify
 from flask_jwt_extended import jwt_required
 from .. import db
 from sqlalchemy import text
+
+logger = logging.getLogger(__name__)
 
 debug = Blueprint('debug', __name__, url_prefix='/debug')
 
@@ -28,5 +32,6 @@ def db_status():
                 "card": card_count,
             }
         })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        logger.exception("debug/db query failed")
+        return jsonify({"error": "No se pudo consultar la base de datos"}), 500
