@@ -3,7 +3,7 @@ import os
 
 import sentry_sdk
 from sentry_sdk.integrations.flask import FlaskIntegration
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from .config import Config
 from flask_cors import CORS
@@ -100,6 +100,29 @@ def create_app():
     @app.errorhandler(429)
     def _rate_limit_exceeded(e):
         return jsonify({"error": "Has alcanzado el limite de peticiones. Intentalo de nuevo mas tarde."}), 429
+
+    @app.errorhandler(413)
+    def _payload_too_large(e):
+        return jsonify({"error": "La peticion es demasiado grande"}), 413
+
+    # Raised by get_json() in handlers when a JSON-typed body is empty.
+    @app.errorhandler(400)
+    def _bad_request(e):
+        return jsonify({"error": "La peticion no es valida"}), 400
+
+    @app.before_request
+    def _require_json_object_body():
+        """Single owner of the shape of JSON bodies: handlers can call
+        data.get(...) knowing they got an object. An empty body passes (the
+        frontend sends Content-Type: application/json even on body-less
+        POSTs); handlers that need a body answer that case themselves."""
+        if request.method not in ("POST", "PUT", "PATCH") or not request.is_json:
+            return None
+        if not request.get_data().strip():
+            return None
+        if not isinstance(request.get_json(silent=True), dict):
+            return jsonify({"error": "El cuerpo de la peticion debe ser un objeto JSON valido"}), 400
+        return None
 
     from .models.user import User
     from .models.session import Session
