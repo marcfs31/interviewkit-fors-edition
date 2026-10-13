@@ -335,7 +335,7 @@ class TestThroughTheRoutes:
         assert row.session_id == resp.get_json()["session_id"]
         assert (row.kind, row.status, row.attempt) == ("questions", "ok", 1)
 
-    def test_failed_create_session_keeps_the_record_after_deleting_the_session(
+    def test_failed_create_session_keeps_the_record_without_a_session(
         self, client, auth_headers, monkeypatch
     ):
         _stub_create(monkeypatch, _raiser(_rate_limit_error()))
@@ -344,11 +344,43 @@ class TestThroughTheRoutes:
 
         assert resp.status_code == 429
         assert resp.headers["Retry-After"] == "5"
-        assert Session.query.count() == 0  # create_session still cleans up
+        assert Session.query.count() == 0  # the session is never created
         (row,) = _rows()
         assert row.status == "rate_limited"
         assert row.user_id == auth_headers["user_id"]
-        assert row.session_id is not None  # kept for correlation, no FK
+        assert row.session_id is None  # there is no session to point to
+
+    def test_every_attempt_of_a_created_session_carries_its_final_id(
+        self, client, auth_headers, monkeypatch
+    ):
+        replies = iter([_completion("not json"), _completion(json.dumps(GOOD_QUESTIONS))])
+        _stub_create(monkeypatch, lambda **kw: next(replies))
+
+        resp = client.post("/sessions/", json=self.PAYLOAD, headers=auth_headers)
+
+        assert resp.status_code == 201
+        rows = _rows()
+        assert [r.attempt for r in rows] == [1, 2]
+        assert {r.session_id for r in rows} == {resp.get_json()["session_id"]}
+
+    def test_a_concurrent_generation_does_not_steal_another_sessions_calls(
+        self, client, auth_headers, monkeypatch
+    ):
+        """Only the rows written by this request's own generation are linked."""
+        _stub_create(monkeypatch, lambda **kw: _completion(json.dumps(GOOD_QUESTIONS)))
+        other = AICall(
+            kind="questions", model="m", user_id=auth_headers["user_id"], session_id=None,
+            attempt=1, latency_ms=1, status="ok",
+        )
+        from app import db
+        db.session.add(other)
+        db.session.commit()
+        other_id = other.id
+
+        resp = client.post("/sessions/", json=self.PAYLOAD, headers=auth_headers)
+
+        assert resp.status_code == 201
+        assert AICall.query.filter_by(id=other_id).first().session_id is None
 
     def test_a_broken_ai_call_table_does_not_change_the_api_response(
         self, client, auth_headers, monkeypatch

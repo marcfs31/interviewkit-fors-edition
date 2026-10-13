@@ -140,6 +140,8 @@ _call_context = contextvars.ContextVar("ai_call_context", default=None)
 # Id of the ai_call row written by the latest _call_groq in this context, so
 # an unreadable JSON can downgrade it afterwards.
 _last_call_id = contextvars.ContextVar("ai_last_call_id", default=None)
+# List collecting the id of every ai_call row written inside collect_ai_call_ids().
+_collected_call_ids = contextvars.ContextVar("ai_collected_call_ids", default=None)
 
 
 @contextmanager
@@ -152,6 +154,19 @@ def ai_call_context(**values):
         yield
     finally:
         _call_context.reset(token)
+
+
+@contextmanager
+def collect_ai_call_ids():
+    """Yields a list that receives the id of each ai_call row written inside
+    the block, so a caller that only learns its session id afterwards can link
+    them to it."""
+    ids = []
+    token = _collected_call_ids.set(ids)
+    try:
+        yield ids
+    finally:
+        _collected_call_ids.reset(token)
 
 
 def _rollback_quietly():
@@ -190,6 +205,9 @@ def _record_call(kind, started, status, completion=None, http_status=None, error
         db.session.add(row)
         db.session.commit()
         _last_call_id.set(row.id)
+        collected = _collected_call_ids.get()
+        if collected is not None:
+            collected.append(row.id)
     except Exception:
         logger.warning("Could not record the AI call", exc_info=True)
         _rollback_quietly()

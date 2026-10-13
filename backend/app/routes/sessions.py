@@ -1,5 +1,6 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from sqlalchemy import select
 from ..constants.stacks import VALID_LEVELS, VALID_STACKS, VALID_TOPICS, TOPICS, LEGACY_TOPIC_ALIASES
 from ..constants.gamification import (
     XP_PER_LEVEL, XP_PER_RESULT, XP_COMPLETION_BONUS,
@@ -9,7 +10,10 @@ from ..models.session import Session
 from ..models.question import Question
 from ..models.user import User
 from .. import db, limiter
-from ..services.ai_service import AIUnavailableError, ai_call_context, generate_questions, generate_feedback
+from ..models.ai_call import AICall
+from ..services.ai_service import (
+    AIUnavailableError, ai_call_context, collect_ai_call_ids, generate_questions, generate_feedback,
+)
 
 sessions = Blueprint('sessions', __name__, url_prefix='/sessions')
 
@@ -80,31 +84,30 @@ def create_session():
     if topic not in stack_topics:
         topic = TOPICS.get(stack, [None])[0]
 
-    new_session = Session(user_id=user_id, stack=stack, level=level, topic=topic)
-    db.session.add(new_session)
-    # Flush to get the id, then read it before the commit expires the instance:
-    # touching an ORM attribute afterwards would open a transaction that stays
-    # open during the Groq call.
-    db.session.flush()
-    new_session_id = new_session.session_id
-    db.session.commit()
-
-    # Two question blocks: theory first, then code
+    # Generate first: no Session row exists until the questions do, so a
+    # failure or a killed worker can't leave an empty session behind.
     try:
-        with ai_call_context(user_id=int(user_id), session_id=new_session_id):
+        with collect_ai_call_ids() as call_ids, ai_call_context(user_id=int(user_id)):
             questions = generate_questions(stack, level, topic)
     except AIUnavailableError as error:
-        db.session.delete(new_session)
-        db.session.commit()
         return _ai_error_response(error)
     theory_questions = questions.get("theory", [])
     code_questions = questions.get("code", [])
 
+    new_session = Session(user_id=user_id, stack=stack, level=level, topic=topic)
+    db.session.add(new_session)
+    db.session.flush()
     # Order matters here: theory questions are saved before code questions
     for question in theory_questions:
         db.session.add(Question(question=question, session_id=new_session.session_id, question_type="theory"))
     for question in code_questions:
         db.session.add(Question(question=question, session_id=new_session.session_id, question_type="code"))
+    # Link the ai_call rows written during generation to the session, in the
+    # same commit that creates it.
+    if call_ids:
+        AICall.query.filter(AICall.id.in_(call_ids)).update(
+            {"session_id": new_session.session_id}, synchronize_session=False,
+        )
 
     db.session.commit()
 
@@ -148,6 +151,10 @@ def answer_question(session_id, question_id):
 
     if user_sesion is None:
         return jsonify({"msg": "La sesión no existe"}), 404
+
+    # A completed session has already paid its XP: its answers are final
+    if user_sesion.is_completed:
+        return jsonify({"msg": "Esta sesion ya fue completada"}), 409
 
     user_question = Question.query.filter_by(question_id=question_id, session_id=session_id).first()
 
@@ -194,13 +201,16 @@ def complete_session(session_id):
     """Computes the XP earned in the session, updates the User, and returns stats."""
     user_id = get_jwt_identity()
 
-    # Ownership check: the session must belong to the authenticated user
-    user_session = Session.query.filter_by(session_id=session_id, user_id=user_id).first()
-    if user_session is None:
-        return jsonify({"msg": "La sesion no existe"}), 404
-
-    # Idempotency guard: a session can only be completed once
-    if user_session.is_completed:
+    # Claim the session first with one conditional UPDATE: of two concurrent
+    # completions only one matches `is_completed = false`, so XP is paid once.
+    # The row lock it takes lasts until the commit below.
+    claimed = Session.query.filter_by(
+        session_id=session_id, user_id=user_id, is_completed=False,
+    ).update({"is_completed": True}, synchronize_session=False)
+    if claimed == 0:
+        # Not claimed: either it isn't the user's (or doesn't exist), or it was already completed
+        if Session.query.filter_by(session_id=session_id, user_id=user_id).first() is None:
+            return jsonify({"msg": "La sesion no existe"}), 404
         return jsonify({"msg": "Esta sesion ya fue completada"}), 409
 
     questions = Question.query.filter_by(session_id=session_id).all()
@@ -223,26 +233,33 @@ def complete_session(session_id):
         xp_earned += XP_COMPLETION_BONUS
         bonus_applied = True
 
-    user = User.query.filter_by(user_id=user_id).first()
-    if user is None:
+    # Increment in SQL, never read-modify-write in Python: two sessions
+    # completed at once must both count.
+    awarded = User.query.filter_by(user_id=user_id).update(
+        {"total_xp": User.total_xp + xp_earned}, synchronize_session=False,
+    )
+    if awarded == 0:
+        db.session.rollback()
         return jsonify({"msg": "Usuario no encontrado"}), 404
 
-    user.total_xp = (user.total_xp or 0) + xp_earned
-    user.level = compute_level(user.total_xp)
-
-    # Marked completed to prevent this session from awarding XP again
-    user_session.is_completed = True
+    # Read back inside the same transaction: the row is locked, so this is
+    # exactly the value the level must be derived from.
+    total_xp = db.session.execute(
+        select(User.total_xp).where(User.user_id == user_id)
+    ).scalar_one()
+    level = compute_level(total_xp)
+    User.query.filter_by(user_id=user_id).update({"level": level}, synchronize_session=False)
     db.session.commit()
 
-    progress_in_level = max(0, user.total_xp - ((user.level - 1) * XP_PER_LEVEL))
+    progress_in_level = max(0, total_xp - ((level - 1) * XP_PER_LEVEL))
 
     return jsonify({
         "session_id": session_id,
         "xp_earned": xp_earned,
         "bonus_applied": bonus_applied,
-        "total_xp": user.total_xp,
-        "level": user.level,
-        "xp_to_next_level": xp_to_next_level(user.total_xp),
+        "total_xp": total_xp,
+        "level": level,
+        "xp_to_next_level": xp_to_next_level(total_xp),
         "progress_in_level": progress_in_level,
         "xp_per_level": XP_PER_LEVEL,
         "breakdown": breakdown,

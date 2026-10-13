@@ -349,6 +349,152 @@ class TestCompleteSession:
             assert _db.session.get(Session, session_id).is_completed is False
 
 
+class TestSessionIntegrity:
+    """XP is awarded exactly once and sessions never exist half-built.
+
+    The races are simulated deterministically: `_stale_reads` makes the
+    handler's ORM reads return a snapshot taken BEFORE a competing request
+    committed, which is what two overlapping requests see on a real database.
+    """
+
+    @staticmethod
+    def _answer_all(client, headers):
+        created = _create_session(client, headers).get_json()
+        for q in created["questions"]:
+            client.patch(
+                f"/sessions/{created['session_id']}/questions/{q['question_id']}",
+                json={"answer": "x"}, headers=headers,
+            )
+        return created["session_id"]
+
+    @staticmethod
+    def _stale_reads(monkeypatch, **snapshots):
+        """Makes `Model.query...first()` return the given stand-in for each
+        model name (e.g. Session=..., User=...), as if read before a commit."""
+        from sqlalchemy.orm import Query
+        real_first = Query.first
+
+        def first(self):
+            entity = self.column_descriptions[0]["entity"]
+            stale = snapshots.get(getattr(entity, "__name__", None))
+            return stale if stale is not None else real_first(self)
+
+        monkeypatch.setattr(Query, "first", first)
+
+    @staticmethod
+    def _total_xp(user_id):
+        from app import db
+        from app.models.user import User
+        from sqlalchemy import select
+        db.session.rollback()
+        return db.session.execute(select(User.total_xp).where(User.user_id == user_id)).scalar_one()
+
+    def test_two_overlapping_completions_of_one_session_award_xp_once(self, client, auth_headers, monkeypatch):
+        from types import SimpleNamespace
+        session_id = self._answer_all(client, auth_headers)
+        stale_session = SimpleNamespace(
+            session_id=session_id, user_id=auth_headers["user_id"], is_completed=False,
+        )
+        first = client.post(f"/sessions/{session_id}/complete", headers=auth_headers)
+        assert first.status_code == 200
+
+        # The second request read the session before the first one committed.
+        self._stale_reads(monkeypatch, Session=stale_session)
+        second = client.post(f"/sessions/{session_id}/complete", headers=auth_headers)
+
+        assert second.status_code == 409
+        assert self._total_xp(auth_headers["user_id"]) == first.get_json()["xp_earned"]
+
+    def test_completing_two_sessions_from_a_stale_user_counts_both(self, client, auth_headers, monkeypatch):
+        from types import SimpleNamespace
+        session_a = self._answer_all(client, auth_headers)
+        session_b = self._answer_all(client, auth_headers)
+        stale_user = SimpleNamespace(user_id=auth_headers["user_id"], total_xp=0, level=1)
+
+        a = client.post(f"/sessions/{session_a}/complete", headers=auth_headers)
+        # The request for B read the user before A's award was committed.
+        self._stale_reads(monkeypatch, User=stale_user)
+        b = client.post(f"/sessions/{session_b}/complete", headers=auth_headers)
+
+        assert (a.status_code, b.status_code) == (200, 200)
+        total = a.get_json()["xp_earned"] + b.get_json()["xp_earned"]
+        assert total == 2 * 550
+        assert self._total_xp(auth_headers["user_id"]) == total
+        assert b.get_json()["total_xp"] == total
+
+    def test_level_follows_the_xp_accumulated_in_the_database(self, client, auth_headers):
+        """Three full sessions (550 XP each) cross the 500 XP-per-level step."""
+        for _ in range(3):
+            session_id = self._answer_all(client, auth_headers)
+            data = client.post(f"/sessions/{session_id}/complete", headers=auth_headers).get_json()
+        assert data["total_xp"] == 1650
+        assert data["level"] == 4
+        assert data["xp_to_next_level"] == 350
+
+    def test_a_missing_user_rolls_back_the_completion(self, client, auth_headers):
+        """If the XP update finds no user, the session must not stay completed."""
+        from app import db
+        from app.models.session import Session
+        from sqlalchemy import text
+        session_id = self._answer_all(client, auth_headers)
+        db.session.execute(text("DELETE FROM user WHERE user_id = :u"), {"u": auth_headers["user_id"]})
+        db.session.commit()
+
+        resp = client.post(f"/sessions/{session_id}/complete", headers=auth_headers)
+
+        assert resp.status_code == 404
+        assert Session.query.filter_by(session_id=session_id).first().is_completed is False
+
+    def test_answering_a_completed_session_returns_409(self, client, auth_headers, monkeypatch):
+        session_id = self._answer_all(client, auth_headers)
+        client.post(f"/sessions/{session_id}/complete", headers=auth_headers)
+        called = []
+        monkeypatch.setattr(
+            "app.routes.sessions.generate_feedback",
+            lambda *a, **k: called.append(1) or dict(FAKE_FEEDBACK),
+        )
+        from app.models.question import Question
+        question = Question.query.filter_by(session_id=session_id).first()
+        before = question.answer
+
+        resp = client.patch(
+            f"/sessions/{session_id}/questions/{question.question_id}",
+            json={"answer": "changed after completing"}, headers=auth_headers,
+        )
+
+        assert resp.status_code == 409
+        assert called == []
+        assert Question.query.filter_by(question_id=question.question_id).first().answer == before
+
+    def test_a_generator_crash_leaves_no_session_behind(self, client, auth_headers, monkeypatch):
+        def boom(stack, level, topic):
+            raise RuntimeError("worker died")
+
+        monkeypatch.setattr("app.routes.sessions.generate_questions", boom)
+
+        with pytest.raises(RuntimeError):  # TESTING propagates what production turns into a 500
+            _create_session(client, auth_headers)
+
+        from app.models.session import Session
+        from app.models.question import Question
+        assert Session.query.count() == 0
+        assert Question.query.count() == 0
+
+    def test_no_session_row_exists_while_the_questions_are_generated(self, client, auth_headers, monkeypatch):
+        from app.models.session import Session
+        seen = []
+
+        def spy(stack, level, topic):
+            seen.append(Session.query.count())
+            return dict(FAKE_QUESTIONS)
+
+        monkeypatch.setattr("app.routes.sessions.generate_questions", spy)
+
+        assert _create_session(client, auth_headers).status_code == 201
+        assert seen == [0]
+        assert Session.query.count() == 1
+
+
 class TestRateLimiting:
     """The Groq free tier budget is shared across the whole app (see
     AUDIT.md F0-2), so on top of the per-user limit there's a global

@@ -21,8 +21,9 @@ class AICall(db.Model):
     topic = db.Column(db.String(80), nullable=True)
     # SET NULL: deleting an account keeps the metrics but anonymizes them.
     user_id = db.Column(db.Integer, db.ForeignKey(User.user_id, ondelete="SET NULL"), nullable=True)
-    # Deliberately NOT a foreign key: create_session deletes the session row
-    # when the AI fails, and the id must survive to correlate those failures.
+    # Deliberately NOT a foreign key: the rows are written while the questions
+    # are generated, before the session exists, and are linked to it afterwards
+    # (NULL when the generation failed and no session was ever created).
     session_id = db.Column(db.Integer, nullable=True)
     attempt = db.Column(db.Integer, nullable=False, default=1)
     latency_ms = db.Column(db.Integer, nullable=False)
