@@ -52,18 +52,21 @@ def update_card(card_id):
         avoid_when = (data.get("avoid_when") or "").strip()
         card.avoid_when = avoid_when or None
 
-    mnemonic = (data.get("mnemonic") or "").strip()
-    card.mnemonic = mnemonic[:200] if mnemonic else None
+    if "mnemonic" in data:
+        mnemonic = (data.get("mnemonic") or "").strip()
+        card.mnemonic = mnemonic[:200] if mnemonic else None
 
     if "tags" in data:
         card.tags = data["tags"] if isinstance(data["tags"], list) else None
 
-    code = fix_literal_escapes((data.get("code") or "").strip())
-    card.code = code or None
+    if "code" in data:
+        code = fix_literal_escapes((data.get("code") or "").strip())
+        card.code = code or None
 
-    code_language = (data.get("code_language") or "").strip()
-    if code_language:
-        card.code_language = code_language
+    if "code_language" in data:
+        code_language = (data.get("code_language") or "").strip()
+        if code_language:
+            card.code_language = code_language
 
     db.session.commit()
 
