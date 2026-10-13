@@ -187,6 +187,57 @@ class TestOAuthExchange:
 
         assert client.post("/auth/oauth/exchange", json={"code": code}).status_code == 401
 
+    def test_code_is_single_use(self, app, client, db):
+        """A code leaked through history or a log must not mint tokens again."""
+        with app.app_context():
+            user = self._make_user(db)
+            code = _code_from(_build_login_response(user))
+
+        assert client.post("/auth/oauth/exchange", json={"code": code}).status_code == 200
+        replay = client.post("/auth/oauth/exchange", json={"code": code})
+        assert replay.status_code == 401
+        assert "token" not in replay.get_json()
+
+        with app.app_context():
+            assert db.session.get(User, user.user_id).oauth_code_nonce is None
+
+    def test_a_new_login_invalidates_the_previous_unused_code(self, app, client, db):
+        with app.app_context():
+            user = self._make_user(db)
+            first = _code_from(_build_login_response(user))
+            second = _code_from(_build_login_response(user))
+
+        assert client.post("/auth/oauth/exchange", json={"code": first}).status_code == 401
+        assert client.post("/auth/oauth/exchange", json={"code": second}).status_code == 200
+
+    def test_an_expired_code_does_not_consume_the_nonce(self, app, client, db):
+        with app.app_context():
+            user = self._make_user(db)
+            code = _code_from(_build_login_response(user))
+
+        with patch("app.routes.oauth.OAUTH_CODE_MAX_AGE_SECONDS", -1):
+            assert client.post("/auth/oauth/exchange", json={"code": code}).status_code == 401
+        with app.app_context():
+            assert db.session.get(User, user.user_id).oauth_code_nonce is not None
+
+    def test_a_validly_signed_code_without_a_nonce_is_rejected(self, app, client, db):
+        """Codes minted before single-use existed carry no nonce."""
+        from app.routes.oauth import _code_serializer
+        with app.app_context():
+            user = self._make_user(db)
+            code = _code_serializer().dumps({"uid": user.user_id})
+
+        assert client.post("/auth/oauth/exchange", json={"code": code}).status_code == 401
+
+    def test_a_validly_signed_code_with_a_wrong_nonce_is_rejected(self, app, client, db):
+        from app.routes.oauth import _code_serializer
+        with app.app_context():
+            user = self._make_user(db)
+            _build_login_response(user)
+            code = _code_serializer().dumps({"uid": user.user_id, "nonce": "forged"})
+
+        assert client.post("/auth/oauth/exchange", json={"code": code}).status_code == 401
+
     def test_a_jwt_cannot_be_used_as_an_exchange_code(self, app, client, db):
         """The code is signed with a dedicated salt, so an access token (or
         any other signed value) is not accepted in its place."""
@@ -247,7 +298,8 @@ class TestGoogleCallback:
         with patch("app.routes.oauth.oauth") as mock_oauth:
             mock_oauth.google.authorize_access_token.return_value = mock_token
             mock_oauth.google.userinfo.return_value = {
-                "sub": "google_explicit", "email": "explicit@example.com", "name": "Explicit User",
+                "sub": "google_explicit", "email": "explicit@example.com", "email_verified": True,
+                "name": "Explicit User",
             }
 
             resp = client.get("/auth/google/callback")
@@ -270,7 +322,8 @@ class TestGoogleCallback:
 
     def test_successful_full_flow_creates_user_and_link_and_redirects_to_the_callback(self, client, db):
         mock_token = {
-            "userinfo": {"sub": "google_user_1", "email": "googleuser@example.com", "name": "Google User"}
+            "userinfo": {"sub": "google_user_1", "email": "googleuser@example.com",
+                         "email_verified": True, "name": "Google User"}
         }
         with patch("app.routes.oauth.oauth") as mock_oauth:
             mock_oauth.google.authorize_access_token.return_value = mock_token
@@ -304,7 +357,7 @@ class TestGoogleCallback:
             assert user.name == "No Email User"
 
     def test_missing_name_falls_back_to_email_local_part(self, client, db):
-        mock_token = {"userinfo": {"sub": "no_name_user", "email": "noname@example.com"}}
+        mock_token = {"userinfo": {"sub": "no_name_user", "email": "noname@example.com", "email_verified": True}}
         with patch("app.routes.oauth.oauth") as mock_oauth:
             mock_oauth.google.authorize_access_token.return_value = mock_token
 
@@ -325,13 +378,89 @@ class TestGoogleCallback:
             db.session.add(existing)
             db.session.commit()
 
-        mock_token = {"userinfo": {"sub": "google_new", "email": "taken@example.com", "name": "New Google Login"}}
+        mock_token = {"userinfo": {"sub": "google_new", "email": "taken@example.com", "email_verified": True,
+                               "name": "New Google Login"}}
         with patch("app.routes.oauth.oauth") as mock_oauth:
             mock_oauth.google.authorize_access_token.return_value = mock_token
 
             resp = client.get("/auth/google/callback")
             assert resp.status_code == 302
             assert "error=email_exists" in resp.location
+
+
+class TestGoogleVerifiedEmail:
+    """Linking by email is only safe when the provider vouches for it."""
+
+    def _login(self, client, userinfo):
+        with patch("app.routes.oauth.oauth") as mock_oauth:
+            mock_oauth.google.authorize_access_token.return_value = {"userinfo": userinfo}
+            return client.get("/auth/google/callback")
+
+    def test_unverified_email_does_not_reach_a_password_account(self, client, db):
+        with client.application.app_context():
+            db.session.add(User(name="Victim", email="victim@example.com", password="hash"))
+            db.session.commit()
+
+        resp = self._login(client, {"sub": "g_attacker", "email": "victim@example.com",
+                                    "email_verified": False, "name": "Attacker"})
+        assert "/auth/callback" in resp.location
+        assert "error=email_exists" not in resp.location
+
+        with client.application.app_context():
+            assert OAuthAccount.query.filter_by(provider="google", provider_user_id="g_attacker").one() \
+                .user.email == "google_g_attacker@users.noreply.google.com"
+            victim = User.query.filter_by(email="victim@example.com").one()
+            assert victim.oauth_code_nonce is None
+            assert OAuthAccount.query.filter_by(user_id=victim.user_id).count() == 0
+
+    def test_unverified_email_does_not_return_an_account_that_has_a_google_link(self, client, db):
+        """The existing-link branch used to hand the victim's account to any
+        Google identity that merely claimed the same address."""
+        with client.application.app_context():
+            victim = User(name="Victim", email="victim@example.com")
+            db.session.add(victim)
+            db.session.flush()
+            db.session.add(OAuthAccount(user_id=victim.user_id, provider="google", provider_user_id="g_victim"))
+            db.session.commit()
+            victim_id = victim.user_id
+
+        self._login(client, {"sub": "g_attacker", "email": "victim@example.com",
+                             "email_verified": False, "name": "Attacker"})
+
+        with client.application.app_context():
+            link = OAuthAccount.query.filter_by(provider="google", provider_user_id="g_attacker").one()
+            assert link.user_id != victim_id
+            assert db.session.get(User, victim_id).oauth_code_nonce is None
+
+    def test_missing_email_verified_claim_counts_as_unverified(self, client, db):
+        resp = self._login(client, {"sub": "g_noclaim", "email": "claim@example.com", "name": "No Claim"})
+        assert "/auth/callback" in resp.location
+        with client.application.app_context():
+            assert User.query.filter_by(email="claim@example.com").first() is None
+            assert User.query.filter_by(email="google_g_noclaim@users.noreply.google.com").first() is not None
+
+    def test_string_true_is_not_a_verified_claim(self, client, db):
+        self._login(client, {"sub": "g_str", "email": "str@example.com", "email_verified": "true", "name": "Str"})
+        with client.application.app_context():
+            assert User.query.filter_by(email="str@example.com").first() is None
+
+    def test_verified_email_is_stored_lowercased_and_matches_a_legacy_mixed_case_row(self, client, db):
+        resp = self._login(client, {"sub": "g_case", "email": " Mixed@Example.COM ",
+                                    "email_verified": True, "name": "Case"})
+        assert "/auth/callback" in resp.location
+        with client.application.app_context():
+            assert User.query.filter_by(email="mixed@example.com").count() == 1
+
+    def test_verified_email_colliding_with_a_legacy_mixed_case_password_row_is_refused(self, client, db):
+        with client.application.app_context():
+            db.session.add(User(name="Legacy", email="Legacy@Example.com", password="hash"))
+            db.session.commit()
+
+        resp = self._login(client, {"sub": "g_legacy", "email": "legacy@example.com",
+                                    "email_verified": True, "name": "Case"})
+        assert "error=email_exists" in resp.location
+        with client.application.app_context():
+            assert User.query.count() == 1
 
 
 class TestGitHubLogin:
@@ -432,3 +561,67 @@ class TestGitHubCallback:
         with client.application.app_context():
             user = User.query.filter_by(email="github_11111@users.noreply.github.com").first()
             assert user is not None
+
+
+class TestGitHubVerifiedEmail:
+    def _login(self, client, profile, emails, emails_ok=True):
+        def mock_get(url, **kwargs):
+            resp = MagicMock()
+            resp.json.return_value = emails if url == "user/emails" else profile
+            resp.ok = emails_ok if url == "user/emails" else True
+            return resp
+
+        with patch("app.routes.oauth.oauth") as mock_oauth:
+            mock_oauth.github.authorize_access_token.return_value = MagicMock()
+            mock_oauth.github.get.side_effect = mock_get
+            return client.get("/auth/github/callback")
+
+    def _only_user_email(self, client, github_id):
+        with client.application.app_context():
+            link = OAuthAccount.query.filter_by(provider="github", provider_user_id=github_id).one()
+            return link.user.email
+
+    def test_unverified_primary_is_ignored(self, client, db):
+        with client.application.app_context():
+            db.session.add(User(name="Victim", email="victim@example.com", password="hash"))
+            db.session.commit()
+
+        resp = self._login(
+            client, {"id": 501, "login": "attacker"},
+            [{"email": "victim@example.com", "primary": True, "verified": False}],
+        )
+        assert "/auth/callback" in resp.location
+        assert "error=email_exists" not in resp.location
+        assert self._only_user_email(client, "501") == "github_501@users.noreply.github.com"
+
+    def test_verified_non_primary_is_not_used(self, client, db):
+        self._login(
+            client, {"id": 502, "login": "x"},
+            [{"email": "second@example.com", "primary": False, "verified": True}],
+        )
+        assert self._only_user_email(client, "502") == "github_502@users.noreply.github.com"
+
+    def test_profile_email_is_ignored_when_it_is_not_a_verified_entry(self, client, db):
+        self._login(
+            client, {"id": 503, "login": "x", "email": "claimed@example.com"},
+            [{"email": "claimed@example.com", "primary": False, "verified": False}],
+        )
+        assert self._only_user_email(client, "503") == "github_503@users.noreply.github.com"
+
+    def test_profile_email_is_ignored_when_the_emails_endpoint_fails(self, client, db):
+        self._login(client, {"id": 504, "login": "x", "email": "claimed@example.com"}, [], emails_ok=False)
+        assert self._only_user_email(client, "504") == "github_504@users.noreply.github.com"
+
+    def test_profile_email_matching_a_verified_entry_is_used_lowercased(self, client, db):
+        self._login(
+            client, {"id": 505, "login": "x", "email": "Public@Example.com"},
+            [{"email": "public@example.com", "primary": False, "verified": True}],
+        )
+        assert self._only_user_email(client, "505") == "public@example.com"
+
+    def test_verified_primary_is_stored_lowercased(self, client, db):
+        self._login(
+            client, {"id": 506, "login": "x"},
+            [{"email": "Prime@Example.COM", "primary": True, "verified": True}],
+        )
+        assert self._only_user_email(client, "506") == "prime@example.com"
