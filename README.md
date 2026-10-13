@@ -162,13 +162,15 @@ The database container started in the setup step keeps running in the background
 
 | Variable | Required | Description |
 |---|---|---|
-| `JWT_SECRET_KEY` | Yes | Secret used to sign JWTs. The app refuses to start without it. |
+| `JWT_SECRET_KEY` | Yes | Secret used to sign JWTs. The app refuses to start without it; in production it must be at least 32 characters. |
+| `SECRET_KEY` | Yes | Flask secret (OAuth state and the one-time sign-in code). Required in every environment; in production at least 32 characters and different from `JWT_SECRET_KEY`. |
 | `DATABASE_URL` | Yes | e.g. `postgresql://admin:admin@localhost:5432/interview_prep` (matches `docker-compose.yml`). |
 | `GROQ_API_KEY` | Yes, for AI features | Groq API key used to generate and evaluate questions. |
-| `FLASK_ENV` | No | `development` locally, `production` when deployed. The `/debug` routes are only registered when it is not `production`. |
+| `FLASK_ENV` | Yes | One of `development`, `test` or `production`; any other value stops the app at startup. The `/debug` routes exist only in `development` and `test`. |
 | `JWT_ACCESS_TOKEN_EXPIRES_HOURS` | No | Lifetime of the access token. |
 | `CORS_ORIGINS` | Yes | Allowed frontend origins, e.g. `http://localhost:3000`. |
-| `FRONTEND_URL` | Yes | Where OAuth callbacks redirect the user. |
+| `FRONTEND_URL` | In production | Where OAuth callbacks redirect the user. Defaults to `http://localhost:3000` outside production. |
+| `RATELIMIT_STORAGE_URI` | No | Rate-limiter storage, e.g. `redis://…` (needs the `redis` package). Defaults to `memory://`: limits are then per process and reset on restart, and production logs a warning. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | For Google login | OAuth credentials. |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | For GitHub login | OAuth credentials. |
 | `LOG_LEVEL` | No | Log level: `DEBUG`, `INFO`, `WARNING` or `ERROR`. Defaults to `INFO`; an unknown value also falls back to `INFO`. |
@@ -178,7 +180,7 @@ The database container started in the setup step keeps running in the background
 
 | Variable | Description |
 |---|---|
-| `NEXT_PUBLIC_API_URL` | Base URL of the backend, e.g. `http://localhost:5000`. |
+| `NEXT_PUBLIC_API_URL` | Base URL of the backend, e.g. `http://localhost:5000`. Required for production builds: it sets the CSP `connect-src`, and the build fails without a valid absolute URL. |
 
 > Never commit real secrets. Use `.env.example` as the template and keep `.env` files out of git.
 
@@ -186,14 +188,15 @@ The database container started in the setup step keeps running in the background
 
 ## API overview
 
-All endpoints except `/auth/*`, `/stacks`, `/health` and the OAuth flow require a valid session cookie.
+All endpoints except `/auth/*`, `/stacks`, `/health` and the OAuth flow require a valid access token in the `Authorization: Bearer` header.
 
 | Method | Endpoint | Description |
 |---|---|---|
 | `POST` | `/auth/register` | Create an account with email and password |
-| `POST` | `/auth/login` | Log in and set the session cookie |
-| `POST` | `/auth/logout` | Clear the session cookie |
+| `POST` | `/auth/login` | Log in and get an access token (sent back as `Authorization: Bearer`) |
+| `POST` | `/auth/logout` | Log out (the client drops its token; no server-side revocation) |
 | `GET` | `/auth/google`, `/auth/github` | Start the OAuth flow (callbacks at `/auth/<provider>/callback`) |
+| `POST` | `/auth/oauth/exchange` | Trade the one-time code from the OAuth redirect for an access token |
 | `GET` | `/stacks/` | Available roles, technologies and levels |
 | `POST` | `/sessions/` | Start a session and generate 5 questions: 2 theory + 3 code (AI) |
 | `PATCH` | `/sessions/<id>/questions/<qid>` | Submit an answer and get AI feedback |
@@ -279,7 +282,7 @@ interviewkit/
 cd backend && fly deploy
 ```
 
-Migrations run automatically on every deploy (`release_command` in `fly.toml`). Set environment variables with `fly secrets set`, and make sure `FLASK_ENV=production`.
+Migrations run automatically on every deploy (`release_command` in `fly.toml`). Set environment variables with `fly secrets set` (at least `JWT_SECRET_KEY`, `SECRET_KEY`, `DATABASE_URL`, `GROQ_API_KEY`, `CORS_ORIGINS` and `FRONTEND_URL`); `fly.toml` already sets `FLASK_ENV=production`.
 
 **Frontend: Vercel**
 
