@@ -19,6 +19,11 @@ sessions = Blueprint('sessions', __name__, url_prefix='/sessions')
 GROQ_GLOBAL_LIMIT = "20 per minute;40 per day"
 GROQ_GLOBAL_SCOPE = "groq_global"
 
+# Half of the global daily budget per account, shared by both AI endpoints,
+# so a single user can't exhaust what everyone else relies on.
+GROQ_USER_DAILY_LIMIT = "20 per day"
+GROQ_USER_DAILY_SCOPE = "groq_user_daily"
+
 # A huge answer burns the shared Groq token quota (100K TPD).
 MAX_ANSWER_LENGTH = 4000
 
@@ -47,6 +52,10 @@ def _ai_error_response(error):
 @jwt_required()
 # Per-user limit: keeps a single account from draining the shared budget
 @limiter.limit("5 per hour", deduct_when=_deduct_only_on_success)
+# Per-user daily cap, shared with answer_question
+@limiter.shared_limit(
+    GROQ_USER_DAILY_LIMIT, scope=GROQ_USER_DAILY_SCOPE, deduct_when=_deduct_only_on_success,
+)
 # Global limit: protects the actual Groq account budget (free tier)
 @limiter.shared_limit(
     GROQ_GLOBAL_LIMIT, scope=GROQ_GLOBAL_SCOPE, key_func=_groq_global_key,
@@ -123,6 +132,9 @@ def create_session():
 @sessions.route('/<int:session_id>/questions/<int:question_id>', methods=['PATCH'])
 @jwt_required()
 @limiter.limit("15 per hour", deduct_when=_deduct_only_on_success)
+@limiter.shared_limit(
+    GROQ_USER_DAILY_LIMIT, scope=GROQ_USER_DAILY_SCOPE, deduct_when=_deduct_only_on_success,
+)
 @limiter.shared_limit(
     GROQ_GLOBAL_LIMIT, scope=GROQ_GLOBAL_SCOPE, key_func=_groq_global_key,
     deduct_when=_deduct_only_on_success,

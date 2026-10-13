@@ -12,7 +12,6 @@ import groq
 import httpx
 import pytest
 
-from app import limiter
 from app.models.ai_call import AICall
 from app.models.session import Session
 from app.services import ai_service
@@ -60,13 +59,6 @@ def _raiser(error):
 
 def _rows():
     return AICall.query.order_by(AICall.id).all()
-
-
-@pytest.fixture(autouse=True)
-def _reset_rate_limits():
-    limiter.reset()
-    yield
-    limiter.reset()
 
 
 class TestRecordedRows:

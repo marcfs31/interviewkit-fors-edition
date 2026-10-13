@@ -3,7 +3,8 @@ import re
 from flask import Blueprint, request, jsonify, current_app
 from ..models.user import User
 import bcrypt
-from .. import db
+from .. import db, limiter
+from flask_limiter.util import get_remote_address
 from flask_jwt_extended import create_access_token, set_access_cookies, unset_access_cookies
 
 
@@ -14,6 +15,7 @@ auth = Blueprint('auth', __name__, url_prefix='/auth')
 
 
 @auth.route('/register', methods=['POST'])
+@limiter.limit("5 per hour", key_func=get_remote_address)
 def register():
     data = request.get_json()
     if data is None:
@@ -44,6 +46,7 @@ def register():
     return jsonify({"success": "Usuario creado correctamente"}), 201
 
 @auth.route('/login', methods=['POST'])
+@limiter.limit("10 per minute;50 per hour", key_func=get_remote_address)
 def login():
     data = request.get_json()
     if data is None:

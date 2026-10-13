@@ -12,6 +12,12 @@ def _get_database_url():
     return url
 
 
+def _get_ratelimit_storage_uri():
+    """Where Flask-Limiter keeps its counters. Unset or blank keeps the
+    per-process memory:// storage (a shared one needs e.g. a redis:// URI)."""
+    return (os.getenv("RATELIMIT_STORAGE_URI") or "").strip() or "memory://"
+
+
 ALLOWED_ENVS = ("development", "test", "production")
 _DEFAULT_FRONTEND_URL = "http://localhost:3000"
 _MIN_PROD_SECRET_LENGTH = 32
@@ -102,6 +108,8 @@ class Config:
     # on the redirect back from Google/GitHub.
     SESSION_COOKIE_SAMESITE = _SETTINGS["COOKIE_SAMESITE"]
     SESSION_COOKIE_SECURE = _SETTINGS["COOKIE_SECURE"]
+
+    RATELIMIT_STORAGE_URI = _get_ratelimit_storage_uri()
 
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 

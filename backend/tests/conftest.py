@@ -17,7 +17,7 @@ os.environ["GITHUB_CLIENT_SECRET"] = "test-github-client-secret"
 os.environ["GROQ_API_KEY"] = "test-groq-api-key"
 
 import pytest
-from app import create_app, db as _db
+from app import create_app, db as _db, limiter
 from app.models.user import User
 
 
@@ -34,6 +34,21 @@ def app():
         "JWT_COOKIE_SAMESITE": "Lax",
     })
     return app
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limits(request):
+    """The limiter's in-memory storage outlives each test, and every test
+    reaches the API from the same IP: without this, the auth limits would
+    leak across tests. Only tests that use `app` can hit the limiter (and
+    only then is its storage initialised); requesting `app` here instead
+    would make pytest-flask push a request context into every test."""
+    if "app" not in request.fixturenames:
+        yield
+        return
+    limiter.reset()
+    yield
+    limiter.reset()
 
 
 @pytest.fixture(scope="function")
