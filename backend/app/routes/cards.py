@@ -159,16 +159,22 @@ def create_card():
     user_id = get_jwt_identity()
     data = request.get_json() or {}
 
+    session_id = data.get("session_id")
+    question_id = data.get("question_id")
+    # bool is an int subclass, and anything else reaches the DB driver as a 500
+    if not all(isinstance(v, int) and not isinstance(v, bool) for v in (session_id, question_id)):
+        return jsonify({"error": "session_id y question_id deben ser números enteros"}), 400
+
     # Ownership check: the session must belong to the authenticated user
     session = Session.query.filter_by(
-        session_id=data.get("session_id"), user_id=user_id
+        session_id=session_id, user_id=user_id
     ).first()
     if not session:
         return jsonify({"msg": "La sesion no existe"}), 404
 
     # The question must belong to that same session, not just exist
     question = Question.query.filter_by(
-        question_id=data.get("question_id"), session_id=data.get("session_id")
+        question_id=question_id, session_id=session_id
     ).first()
     if not question:
         return jsonify({"msg": "La pregunta no existe"}), 404
