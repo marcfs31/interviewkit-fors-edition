@@ -7,6 +7,7 @@ import LevelHero from "@/components/stats/LevelHero";
 import StatCards from "@/components/stats/StatCards";
 import RecentSessions from "@/components/stats/RecentSessions";
 import SavedCardsSummary from "@/components/stats/SavedCardsSummary";
+import StatsUnavailable from "@/components/stats/StatsUnavailable";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { containerVariants, itemVariants } from "@/components/layout/motion-variants";
@@ -15,7 +16,16 @@ const ResultsDonut = dynamic(() => import("@/components/stats/ResultsDonut"), { 
 const StackBars = dynamic(() => import("@/components/stats/StackBars"), { ssr: false });
 
 export default function StatsPage() {
-  const { stats } = useAuth();
+  const { stats, statsStatus, refreshStats } = useAuth();
+
+  if (!stats) {
+    return (
+      <PageContainer max="5xl" className="pb-10">
+        <PageHeader title="Estadísticas" description="Tu nivel, tus aciertos y en qué stacks practicas más." />
+        <StatsUnavailable status={statsStatus === "error" ? "error" : "loading"} onRetry={refreshStats} />
+      </PageContainer>
+    );
+  }
 
   return (
     <PageContainer max="5xl" className="pb-10">

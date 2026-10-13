@@ -25,8 +25,12 @@ function TestConsumer() {
     <div>
       <span data-testid="user">{String(auth.user)}</span>
       <span data-testid="initialized">{String(auth.initialized)}</span>
-      <span data-testid="stats-level">{auth.stats.level}</span>
-      <span data-testid="stats-xp">{auth.stats.total_xp}</span>
+      <span data-testid="stats-status">{auth.statsStatus}</span>
+      <span data-testid="stats-level">{auth.stats ? auth.stats.level : 'none'}</span>
+      <span data-testid="stats-xp">{auth.stats ? auth.stats.total_xp : 'none'}</span>
+      <button data-testid="refresh-btn" onClick={() => auth.refreshStats()}>
+        Refresh
+      </button>
       <button data-testid="login-btn" onClick={() => auth.login('TestUser')}>
         Login
       </button>
@@ -155,8 +159,8 @@ describe('AuthContext', () => {
     expect(window.localStorage.getItem('user')).toBeNull();
     expect(window.localStorage.getItem('access_token')).toBeNull();
     expect(screen.getByTestId('user').textContent).toBe('null');
-    expect(screen.getByTestId('stats-level').textContent).toBe('1');
-    expect(screen.getByTestId('stats-xp').textContent).toBe('0');
+    expect(screen.getByTestId('stats-level').textContent).toBe('none');
+    expect(screen.getByTestId('stats-xp').textContent).toBe('none');
     expect(mockLogoutUser).toHaveBeenCalled();
   });
 
@@ -281,6 +285,67 @@ describe('AuthContext', () => {
     expect(mockGetMyStats).toHaveBeenCalled();
     expect(screen.getByTestId('stats-level').textContent).toBe('2');
     expect(screen.getByTestId('stats-xp').textContent).toBe('100');
+    expect(screen.getByTestId('stats-status').textContent).toBe('ok');
+  });
+
+  it('stats are unknown (null, loading) until the first response arrives', async () => {
+    mockGetMyStats.mockReturnValue(new Promise(() => {}));
+    window.localStorage.setItem('user', 'TestUser');
+    window.localStorage.setItem('access_token', 'jwt');
+    renderWithProvider();
+
+    await waitFor(() => {
+      expect(mockGetMyStats).toHaveBeenCalled();
+    });
+    expect(screen.getByTestId('stats-status').textContent).toBe('loading');
+    expect(screen.getByTestId('stats-level').textContent).toBe('none');
+    expect(screen.getByTestId('stats-xp').textContent).toBe('none');
+  });
+
+  it('a /me/stats failure gives status "error" and null stats, never default numbers', async () => {
+    mockGetMyStats.mockRejectedValue(new Error('down'));
+    window.localStorage.setItem('user', 'TestUser');
+    window.localStorage.setItem('access_token', 'jwt');
+    renderWithProvider();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('stats-status').textContent).toBe('error');
+    });
+    expect(screen.getByTestId('stats-level').textContent).toBe('none');
+    expect(screen.getByTestId('stats-xp').textContent).toBe('none');
+  });
+
+  it('refreshStats() recovers from an error and exposes the real values', async () => {
+    mockGetMyStats.mockRejectedValueOnce(new Error('down'));
+    window.localStorage.setItem('user', 'TestUser');
+    window.localStorage.setItem('access_token', 'jwt');
+    renderWithProvider();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('stats-status').textContent).toBe('error');
+    });
+
+    await act(async () => {
+      screen.getByTestId('refresh-btn').click();
+    });
+
+    expect(screen.getByTestId('stats-status').textContent).toBe('ok');
+    expect(screen.getByTestId('stats-level').textContent).toBe('2');
+    expect(screen.getByTestId('stats-xp').textContent).toBe('100');
+  });
+
+  it('an unauthorized callback resets stats to null', async () => {
+    window.localStorage.setItem('user', 'TestUser');
+    window.localStorage.setItem('access_token', 'jwt');
+    renderWithProvider();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('stats-status').textContent).toBe('ok');
+    });
+    const cb = mockSetOnUnauthorized.mock.calls[0][0];
+    act(() => { cb(); });
+
+    expect(screen.getByTestId('stats-level').textContent).toBe('none');
   });
 
   it('restores session via profile fetch when user exists without token (OAuth cookie flow)', async () => {
