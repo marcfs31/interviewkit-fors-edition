@@ -196,6 +196,58 @@ class TestUpdateCard:
         assert resp.status_code == 200
         assert resp.get_json()["concept"] == "Updated closures"
 
+    def test_partial_patch_keeps_omitted_fields(self, client, auth_headers, session_and_question):
+        """A PATCH that only carries `concept` must not wipe the other fields."""
+        card_id = self._create_card(client, auth_headers, session_and_question)
+        before = client.get("/cards/", headers=auth_headers).get_json()[0]
+        assert before["code"] and before["mnemonic"] and before["code_language"]
+
+        resp = client.patch(f"/cards/{card_id}", json={"concept": "x"}, headers=auth_headers)
+        assert resp.status_code == 200
+
+        after = resp.get_json()
+        assert after["concept"] == "x"
+        for field in (
+            "code", "mnemonic", "code_language", "tags",
+            "definition", "explanation", "use_case", "avoid_when",
+        ):
+            assert after[field] == before[field], field
+
+    @pytest.mark.parametrize("payload, field", [
+        ({"code": ""}, "code"),
+        ({"code": None}, "code"),
+        ({"mnemonic": ""}, "mnemonic"),
+        ({"mnemonic": None}, "mnemonic"),
+    ])
+    def test_explicit_empty_or_null_clears_optional_field(
+        self, client, auth_headers, session_and_question, payload, field
+    ):
+        card_id = self._create_card(client, auth_headers, session_and_question)
+        resp = client.patch(f"/cards/{card_id}", json=payload, headers=auth_headers)
+        assert resp.status_code == 200
+        assert resp.get_json()[field] is None
+
+    def test_patch_updates_mnemonic_code_and_language_when_present(
+        self, client, auth_headers, session_and_question
+    ):
+        card_id = self._create_card(client, auth_headers, session_and_question)
+        resp = client.patch(
+            f"/cards/{card_id}",
+            json={"mnemonic": "m" * 250, "code": "a\\nb", "code_language": "python"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["mnemonic"] == "m" * 200
+        assert body["code"] == "a\nb"
+        assert body["code_language"] == "python"
+
+    def test_patch_empty_code_language_is_ignored(self, client, auth_headers, session_and_question):
+        card_id = self._create_card(client, auth_headers, session_and_question)
+        resp = client.patch(f"/cards/{card_id}", json={"code_language": ""}, headers=auth_headers)
+        assert resp.status_code == 200
+        assert resp.get_json()["code_language"] == "javascript"
+
     def test_update_nonexistent_card_returns_404(self, client, auth_headers):
         resp = client.patch("/cards/999999", json={"concept": "x"}, headers=auth_headers)
         assert resp.status_code == 404
