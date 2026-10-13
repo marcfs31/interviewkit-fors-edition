@@ -1,0 +1,79 @@
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: daily
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
+    groups:
+      flask:
+        patterns:
+          - "Flask"
+          - "Werkzeug"
+          - "flask-cors"
+          - "Flask-JWT-Extended"
+          - "Flask-Limiter"
+      sqlalchemy:
+        patterns:
+          - "SQLAlchemy"
+          - "alembic"
+          - "Flask-SQLAlchemy"
+          - "Flask-Migrate"
+      pytest:
+        patterns:
+          - "pytest*"
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: daily
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
+    groups:
+      next-react:
+        patterns:
+          - "next"
+          - "eslint-config-next"
+          - "react"
+          - "react-dom"
+          - "@types/react*"
+      codemirror:
+        patterns:
+          - "@codemirror/*"
+      radix:
+        patterns:
+          - "radix-ui"
+          - "@radix-ui/*"
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+          - "@vitejs/*"
+          - "@testing-library/*"
+      tailwind:
+        patterns:
+          - "tailwindcss"
+          - "@tailwindcss/*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: daily
+    cooldown:
+      default-days: 7
+    ignore:
+      # A human reads the changelog and decides every Actions major.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: daily
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
