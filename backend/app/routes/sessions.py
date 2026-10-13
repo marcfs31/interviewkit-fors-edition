@@ -100,11 +100,6 @@ def create_session():
     theory_questions = questions.get("theory", [])
     code_questions = questions.get("code", [])
 
-    if not theory_questions and not code_questions:
-        db.session.delete(new_session)
-        db.session.commit()
-        return jsonify({"error": "No se pudieron generar las preguntas. Intentalo de nuevo."}), 503
-
     # Order matters here: theory questions are saved before code questions
     for question in theory_questions:
         db.session.add(Question(question=question, session_id=new_session.session_id, question_type="theory"))
@@ -142,6 +137,13 @@ def create_session():
 def answer_question(session_id, question_id):
     user_id = get_jwt_identity()
     data = request.get_json() or {}
+    answer = data.get("answer") if isinstance(data, dict) else None
+    # Checked first: a blank or non-text answer must reach neither the DB nor Groq.
+    if not isinstance(answer, str) or not answer.strip():
+        return jsonify({"error": "La respuesta no puede estar vacía"}), 400
+    if len(answer) > MAX_ANSWER_LENGTH:
+        return jsonify({"error": f"La respuesta no puede superar los {MAX_ANSWER_LENGTH} caracteres"}), 400
+
     user_sesion = Session.query.filter_by(session_id=session_id, user_id=user_id).first()
 
     if user_sesion is None:
@@ -152,11 +154,11 @@ def answer_question(session_id, question_id):
     if user_question is None:
         return jsonify({"msg": "La pregunta no existe"}), 404
 
-    answer = data.get("answer")
-    if isinstance(answer, str) and len(answer) > MAX_ANSWER_LENGTH:
-        return jsonify({"error": f"La respuesta no puede superar los {MAX_ANSWER_LENGTH} caracteres"}), 400
-
+    # The old grade belongs to the old answer: clear it with the new one, so a
+    # failing AI can never leave the new answer paired with (and paid for by) it.
     user_question.answer = answer
+    user_question.result = None
+    user_question.feedback = None
     # Copied before the commit: reading them afterwards would open a
     # transaction that stays open during the Groq call.
     stack = user_sesion.stack
@@ -164,8 +166,8 @@ def answer_question(session_id, question_id):
     question_type = user_question.question_type
     db.session.commit()
 
-    # The answer is already saved: if the AI fails, `result` stays untouched
-    # (it earns no XP) and the user can simply resubmit.
+    # The answer is already saved with no grade: if the AI fails it earns no XP
+    # and the user can simply resubmit.
     try:
         with ai_call_context(user_id=int(user_id), session_id=session_id):
             result = generate_feedback(

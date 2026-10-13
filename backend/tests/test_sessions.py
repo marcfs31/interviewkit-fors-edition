@@ -132,22 +132,6 @@ class TestCreateSession:
         resp = client.post("/sessions/", json=VALID_PAYLOAD)
         assert resp.status_code == 401
 
-    def test_create_session_when_ai_returns_no_questions_is_rolled_back(self, client, auth_headers, monkeypatch):
-        """If the AI service returns empty theory AND empty code blocks
-        (its documented failure mode -- see ai_service._safe_questions),
-        the just-created Session row must be deleted again (no orphan
-        session with zero questions left behind) and the endpoint must
-        respond with a controlled 503, not a 500 or a fake 201."""
-        monkeypatch.setattr(
-            "app.routes.sessions.generate_questions", lambda stack, level, topic: {"theory": [], "code": []}
-        )
-        resp = _create_session(client, auth_headers)
-        assert resp.status_code == 503
-        assert "error" in resp.get_json()
-
-        from app.models.session import Session
-        assert Session.query.count() == 0
-
 
 class TestAnswerQuestion:
     def test_answer_question_success_saves_answer_and_returns_ai_feedback(self, client, auth_headers):
@@ -185,6 +169,55 @@ class TestAnswerQuestion:
         )
 
         assert resp.status_code == 400
+
+    @pytest.mark.parametrize("body", [
+        {"answer": None}, {}, {"answer": ""}, {"answer": "   "}, {"answer": "\n\t "},
+        {"answer": 123}, {"answer": True}, {"answer": ["texto"]}, {"answer": {"text": "texto"}},
+        ["texto"],
+    ], ids=repr)
+    def test_blank_or_non_string_answer_returns_400_without_touching_db_or_ai(
+        self, client, auth_headers, monkeypatch, body
+    ):
+        created = _create_session(client, auth_headers)
+        session_id = created.get_json()["session_id"]
+        question_id = created.get_json()["questions"][0]["question_id"]
+        assert _patch_answer(client, auth_headers, session_id, question_id, answer="primera").status_code == 200
+
+        def fail_if_called(*args, **kwargs):
+            raise AssertionError("generate_feedback should not be called for an unusable answer")
+        monkeypatch.setattr("app.routes.sessions.generate_feedback", fail_if_called)
+
+        resp = client.patch(
+            f"/sessions/{session_id}/questions/{question_id}", json=body, headers=auth_headers
+        )
+
+        assert resp.status_code == 400
+        assert "error" in resp.get_json()
+        from app.models.question import Question
+        saved = Question.query.filter_by(question_id=question_id).first()
+        assert saved.answer == "primera"
+        assert saved.result == "CORRECT"
+        assert saved.feedback == "Well done."
+
+    def test_answer_with_surrounding_whitespace_is_accepted_as_is(self, client, auth_headers):
+        created = _create_session(client, auth_headers)
+        session_id = created.get_json()["session_id"]
+        question_id = created.get_json()["questions"][0]["question_id"]
+
+        resp = _patch_answer(client, auth_headers, session_id, question_id, answer="  respuesta \n")
+
+        assert resp.status_code == 200
+        from app.models.question import Question
+        assert Question.query.filter_by(question_id=question_id).first().answer == "  respuesta \n"
+
+    def test_answer_at_the_max_length_is_accepted(self, client, auth_headers):
+        created = _create_session(client, auth_headers)
+        session_id = created.get_json()["session_id"]
+        question_id = created.get_json()["questions"][0]["question_id"]
+
+        resp = _patch_answer(client, auth_headers, session_id, question_id, answer="a" * 4000)
+
+        assert resp.status_code == 200
 
     def test_answer_question_nonexistent_session_returns_404(self, client, auth_headers):
         resp = client.patch(
@@ -458,6 +491,66 @@ class TestAIFailures:
         assert resp.get_json()["result"] == "CORRECT"
         from app.models.question import Question
         assert Question.query.filter_by(question_id=question_id).first().result == "CORRECT"
+
+    def test_resubmitted_answer_with_failing_ai_drops_the_previous_grade(self, client, auth_headers, monkeypatch):
+        created = _create_session(client, auth_headers)
+        session_id = created.get_json()["session_id"]
+        question_id = created.get_json()["questions"][0]["question_id"]
+        assert _patch_answer(client, auth_headers, session_id, question_id, answer="primera").status_code == 200
+        _ai_down(monkeypatch, "generate_feedback", status=502)
+
+        resp = _patch_answer(client, auth_headers, session_id, question_id, answer="segunda")
+
+        assert resp.status_code == 502
+        from app.models.question import Question
+        saved = Question.query.filter_by(question_id=question_id).first()
+        assert saved.answer == "segunda"
+        assert saved.result is None
+        assert saved.feedback is None
+
+    def test_resubmitted_answer_with_failing_ai_earns_no_xp_for_that_question(self, client, auth_headers, monkeypatch):
+        created = _create_session(client, auth_headers)
+        session_id = created.get_json()["session_id"]
+        question_id = created.get_json()["questions"][0]["question_id"]
+        assert _patch_answer(client, auth_headers, session_id, question_id, answer="primera").status_code == 200
+        _ai_down(monkeypatch, "generate_feedback", status=502)
+        assert _patch_answer(client, auth_headers, session_id, question_id, answer="segunda").status_code == 502
+
+        resp = client.post(f"/sessions/{session_id}/complete", headers=auth_headers)
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["xp_earned"] == 0
+        assert data["breakdown"] == []
+
+    def test_resubmitted_answer_with_working_ai_replaces_the_previous_grade(self, client, auth_headers, monkeypatch):
+        created = _create_session(client, auth_headers)
+        session_id = created.get_json()["session_id"]
+        question_id = created.get_json()["questions"][0]["question_id"]
+        assert _patch_answer(client, auth_headers, session_id, question_id, answer="primera").status_code == 200
+        monkeypatch.setattr(
+            "app.routes.sessions.generate_feedback",
+            lambda stack, question, answer, question_type="code": {
+                **FAKE_FEEDBACK, "result": "INCORRECT", "feedback": "Nueva.",
+            },
+        )
+
+        assert _patch_answer(client, auth_headers, session_id, question_id, answer="segunda").status_code == 200
+
+        from app.models.question import Question
+        saved = Question.query.filter_by(question_id=question_id).first()
+        assert (saved.answer, saved.result, saved.feedback) == ("segunda", "INCORRECT", "Nueva.")
+
+    def test_create_session_with_unusable_questions_returns_502_and_leaves_no_session(self, client, auth_headers, monkeypatch):
+        _ai_down(monkeypatch, "generate_questions", status=502)
+
+        resp = _create_session(client, auth_headers)
+
+        assert resp.status_code == 502
+        from app.models.session import Session
+        from app.models.question import Question
+        assert Session.query.count() == 0
+        assert Question.query.count() == 0
 
     def test_create_session_with_ai_down_returns_503_and_leaves_no_session(self, client, auth_headers, monkeypatch):
         _ai_down(monkeypatch, "generate_questions")
