@@ -1,4 +1,4 @@
-import { apiFetch, handleResponse } from "./httpClient";
+import { AI_TIMEOUT_MS, apiFetch, handleResponse } from "./httpClient";
 import type { Question, Card, Result  } from "@/reducers/sessionReducer";
 
 
@@ -71,6 +71,7 @@ export async function createSession({ stack, level, topic } : {stack: string, le
   const response = await apiFetch("/sessions/", {
     method: "POST",
     body: JSON.stringify({ stack, level, topic }),
+    timeoutMs: AI_TIMEOUT_MS,
   });
   return handleResponse<CreateSessionResponse>(response);
 }
@@ -81,6 +82,7 @@ export async function submitAnswer(sessionId: number, questionId: number, answer
     {
       method: "PATCH",
       body: JSON.stringify({ answer }),
+      timeoutMs: AI_TIMEOUT_MS,
     }
   );
   return handleResponse<SubmitAnswerResponse>(response);

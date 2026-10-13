@@ -1,4 +1,4 @@
-import { apiFetch, handleResponse } from "./httpClient";
+import { apiFetch, handleResponse, parseErrorMessage } from "./httpClient";
 
 interface GetMyProfileResponse{
   name: string;
@@ -35,14 +35,7 @@ export async function loginUser(email: string, password: string): Promise<LoginU
   });
 
   if (!response.ok) {
-    let errorMsg;
-    try {
-      const data = await response.json();
-      errorMsg = data.error || data.msg || data.message;
-    } catch {
-      errorMsg = null;
-    }
-    throw new Error(errorMsg || `Error ${response.status}: ${response.statusText}`);
+    throw new Error(await parseErrorMessage(response));
   }
 
   return response.json();
@@ -55,14 +48,7 @@ export async function registerUser(name: string, email: string, password: string
   });
 
   if (!response.ok) {
-    let errorMsg;
-    try {
-      const data = await response.json();
-      errorMsg = data.error || data.msg || data.message;
-    } catch {
-      errorMsg = null;
-    }
-    throw new Error(errorMsg || `Error ${response.status}: ${response.statusText}`);
+    throw new Error(await parseErrorMessage(response));
   }
 
   return response.json();
@@ -84,7 +70,7 @@ export async function exchangeOAuthCode(code: string): Promise<LoginUserResponse
     body: JSON.stringify({ code }),
   });
   if (!response.ok) {
-    throw new Error(`No se pudo completar el inicio de sesion (${response.status})`);
+    throw new Error(`No se pudo completar el inicio de sesión (${response.status})`);
   }
   return response.json();
 }
