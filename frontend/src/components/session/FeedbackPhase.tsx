@@ -85,6 +85,7 @@ interface FeedbackPhaseProps {
   onDiscard: () => void;
   onSave: () => void;
   originalCard: SessionCard | null;
+  error?: string | null;
 }
 
 export default function FeedbackPhase({
@@ -95,6 +96,7 @@ export default function FeedbackPhase({
   onDiscard,
   onSave,
   originalCard,
+  error,
 }: FeedbackPhaseProps) {
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
 
@@ -137,6 +139,12 @@ export default function FeedbackPhase({
           </motion.div>
         )}
       </motion.div>
+
+      {error && (
+        <p role="alert" className="text-destructive text-base mb-3 text-right">
+          {error}
+        </p>
+      )}
 
       <div className="flex flex-col-reverse sm:flex-row justify-end gap-2">
         <Button

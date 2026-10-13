@@ -25,6 +25,8 @@ interface SessionCompleteProps {
   progressInLevel?: number;
   bonusApplied?: boolean;
   loading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
 }
 
 export default function SessionComplete({
@@ -39,6 +41,8 @@ export default function SessionComplete({
   progressInLevel = 0,
   bonusApplied = false,
   loading = true,
+  error = null,
+  onRetry,
 }: SessionCompleteProps) {
   const progressPct = xpPerLevel > 0
     ? Math.min(100, Math.max(0, Math.round((progressInLevel / xpPerLevel) * 100)))
@@ -72,7 +76,17 @@ export default function SessionComplete({
             </p>
           </div>
 
-          {loading ? (
+          {error ? (
+            <div
+              role="alert"
+              className="w-full max-w-sm rounded-md border border-destructive/40 bg-destructive/10 p-5 flex flex-col items-center gap-3"
+            >
+              <p className="text-base font-semibold text-foreground">No se pudo calcular tu XP.</p>
+              <Button variant="outline" onClick={onRetry}>
+                Reintentar
+              </Button>
+            </div>
+          ) : loading ? (
             <div className="w-full max-w-sm h-24 rounded-md bg-muted animate-pulse" />
           ) : (
             <motion.div

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useReducer, useEffect, useRef } from "react";
+import { useState, useReducer, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence } from "framer-motion";
 import { useAuth } from "@/context/AuthContext";
@@ -57,7 +57,7 @@ export default function SessionPage() {
       );
       dispatch({ type: "FEEDBACK_RECEIVED", payload: data });
     } catch (err) {
-      dispatch({ type: "SET_ERROR", payload: err instanceof Error ? err.message : String(err) });
+      dispatch({ type: "SUBMIT_FAILED", payload: err instanceof Error ? err.message : String(err) });
     }
   };
 
@@ -84,46 +84,60 @@ export default function SessionPage() {
         code_language: card.code_language,
       });
     } catch (err) {
-      dispatch({ type: "SET_ERROR", payload: "Error al guardar la card: " + (err instanceof Error ? err.message : String(err)) });
+      dispatch({ type: "CARD_SAVE_FAILED", payload: "Error al guardar la card: " + (err instanceof Error ? err.message : String(err)) });
       return;
     }
 
     dispatch({ type: "CARD_SAVED" });
   };
 
+  const sessionId = state.session_id;
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // A late /complete response must not land in a session the user already left
+  // ("Nueva sesión" resets session_id while the request is still in flight).
+  const sessionIdRef = useRef(sessionId);
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
+  const runComplete = useCallback(async () => {
+    const requestedFor = sessionId;
+    const isStale = () => !mountedRef.current || sessionIdRef.current !== requestedFor;
+    try {
+      const data = await completeSession(requestedFor as number);
+      if (isStale()) return;
+      dispatch({ type: "SESSION_COMPLETED", payload: data });
+      refreshStats();
+    } catch (err) {
+      if (isStale()) return;
+      // Re-arm the guard so the retry button can call /complete again; no XP
+      // is invented, the complete screen shows an explicit error instead.
+      completeCalledRef.current = false;
+      dispatch({ type: "COMPLETE_FAILED", payload: err instanceof Error ? err.message : String(err) });
+    }
+  }, [sessionId, refreshStats]);
+
+  const handleRetryComplete = () => {
+    if (completeCalledRef.current) return;
+    completeCalledRef.current = true;
+    dispatch({ type: "COMPLETE_RETRYING" });
+    runComplete();
+  };
+
   // When the session reaches the "complete" phase, calculate XP and refresh stats
   useEffect(() => {
     if (state.currentPhase !== "complete") return;
-    if (completeCalledRef.current) return;
+    if (completeCalledRef.current || state.completeError) return;
     completeCalledRef.current = true;
-
-    let cancelled = false;
-    (async () => {
-      try {
-        const data = await completeSession(state.session_id as number);
-        if (cancelled) return;
-        dispatch({ type: "SESSION_COMPLETED", payload: data });
-        refreshStats();
-      } catch {
-        if (cancelled) return;
-        // On failure, still show the complete screen with 0 XP
-        dispatch({
-          type: "SESSION_COMPLETED",
-          payload: {
-            xp_earned: 0,
-            total_xp: 0,
-            level: 1,
-            xp_to_next_level: 500,
-            bonus_applied: false,
-          },
-        });
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [state.currentPhase, state.session_id, user, refreshStats]);
+    runComplete();
+  }, [state.currentPhase, state.completeError, runComplete]);
 
   if (!state.session_id) {
     return (
@@ -174,6 +188,7 @@ export default function SessionPage() {
               onCardChange={handleCardChange}
               onDiscard={() => dispatch({ type: "CARD_DISCARDED" })}
               onSave={handleSaveCard}
+              error={state.error}
             />
           )}
 
@@ -194,6 +209,8 @@ export default function SessionPage() {
               progressInLevel={state.sessionProgressInLevel}
               bonusApplied={state.sessionBonusApplied}
               loading={!state.sessionCompleteLoaded}
+              error={state.completeError}
+              onRetry={handleRetryComplete}
             />
           )}
         </AnimatePresence>

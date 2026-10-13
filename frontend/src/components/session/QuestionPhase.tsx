@@ -122,6 +122,7 @@ export default function QuestionPhase({
 
       {error && (
         <motion.p
+          role="alert"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           className="text-destructive text-base mt-3"
