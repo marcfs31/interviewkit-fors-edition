@@ -12,6 +12,57 @@ def _get_database_url():
     return url
 
 
+ALLOWED_ENVS = ("development", "test", "production")
+_DEFAULT_FRONTEND_URL = "http://localhost:3000"
+_MIN_PROD_SECRET_LENGTH = 32
+
+
+def load_env_settings(environ):
+    """Validates the environment-dependent settings and derives everything
+    that hangs off FLASK_ENV from that single value. Fails closed: a missing
+    or unknown FLASK_ENV (e.g. a "prod" typo) never degrades to a default."""
+    env = environ.get("FLASK_ENV")
+    if env not in ALLOWED_ENVS:
+        raise RuntimeError(
+            f"FLASK_ENV must be one of {', '.join(ALLOWED_ENVS)}; got {env!r}."
+        )
+    is_prod = env == "production"
+
+    secret_key = environ.get("SECRET_KEY")
+    if not secret_key:
+        raise RuntimeError("SECRET_KEY is required. Set it in .env or the environment variables.")
+    jwt_secret_key = environ.get("JWT_SECRET_KEY")
+    if not jwt_secret_key:
+        raise RuntimeError("JWT_SECRET_KEY is required. Set it in .env or the environment variables.")
+    if is_prod:
+        for name, value in (("SECRET_KEY", secret_key), ("JWT_SECRET_KEY", jwt_secret_key)):
+            if len(value) < _MIN_PROD_SECRET_LENGTH:
+                raise RuntimeError(
+                    f"{name} must be at least {_MIN_PROD_SECRET_LENGTH} characters in production."
+                )
+        if secret_key == jwt_secret_key:
+            raise RuntimeError("SECRET_KEY and JWT_SECRET_KEY must be distinct in production.")
+
+    frontend_url = environ.get("FRONTEND_URL")
+    if not frontend_url:
+        if is_prod:
+            raise RuntimeError("FRONTEND_URL is required in production.")
+        frontend_url = _DEFAULT_FRONTEND_URL
+
+    return {
+        "FLASK_ENV": env,
+        "SECRET_KEY": secret_key,
+        "JWT_SECRET_KEY": jwt_secret_key,
+        "FRONTEND_URL": frontend_url,
+        "COOKIE_SECURE": is_prod,
+        "COOKIE_SAMESITE": "None" if is_prod else "Lax",
+        "PREFERRED_URL_SCHEME": "https" if is_prod else "http",
+    }
+
+
+_SETTINGS = load_env_settings(os.environ)
+
+
 class Config:
     SQLALCHEMY_DATABASE_URI = _get_database_url()
     # pool_pre_ping: check each pooled connection with a lightweight ping
@@ -27,11 +78,9 @@ class Config:
         "pool_pre_ping": True,
         "pool_recycle": 280,
     }
-    SECRET_KEY = os.getenv("SECRET_KEY", os.getenv("JWT_SECRET_KEY", "dev-secret-key"))
+    SECRET_KEY = _SETTINGS["SECRET_KEY"]
 
-    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
-    if not JWT_SECRET_KEY:
-        raise RuntimeError("JWT_SECRET_KEY is required. Set it in .env or the environment variables.")
+    JWT_SECRET_KEY = _SETTINGS["JWT_SECRET_KEY"]
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(
         hours=int(os.getenv("JWT_ACCESS_TOKEN_EXPIRES_HOURS", "1"))
     )
@@ -41,18 +90,18 @@ class Config:
     JWT_TOKEN_LOCATION = ["cookies", "headers"]
     JWT_HEADER_NAME = "Authorization"
     JWT_HEADER_TYPE = "Bearer"
-    JWT_COOKIE_SECURE = os.getenv("FLASK_ENV") == "production"
+    JWT_COOKIE_SECURE = _SETTINGS["COOKIE_SECURE"]
     JWT_COOKIE_CSRF_PROTECT = False
     JWT_ACCESS_COOKIE_PATH = "/"
-    JWT_COOKIE_SAMESITE = "None" if os.getenv("FLASK_ENV") == "production" else "Lax"
+    JWT_COOKIE_SAMESITE = _SETTINGS["COOKIE_SAMESITE"]
 
     # Flask's session cookie (used by Authlib to store the OAuth handshake's
     # state/nonce). Like the JWT, this is cross-site in production (frontend
     # on Vercel, backend on Fly.io), so it needs explicit SameSite=None +
     # Secure; Flask's defaults aren't enough and cause the state to get lost
     # on the redirect back from Google/GitHub.
-    SESSION_COOKIE_SAMESITE = "None" if os.getenv("FLASK_ENV") == "production" else "Lax"
-    SESSION_COOKIE_SECURE = os.getenv("FLASK_ENV") == "production"
+    SESSION_COOKIE_SAMESITE = _SETTINGS["COOKIE_SAMESITE"]
+    SESSION_COOKIE_SECURE = _SETTINGS["COOKIE_SECURE"]
 
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
@@ -68,13 +117,13 @@ class Config:
     CORS_ORIGINS = os.getenv("CORS_ORIGINS", "")
 
     # Public frontend URL (used to redirect after OAuth)
-    FRONTEND_URL = os.getenv("FRONTEND_URL", "")
+    FRONTEND_URL = _SETTINGS["FRONTEND_URL"]
 
     # App mode: "development" | "production" | "test"
-    FLASK_ENV = os.getenv("FLASK_ENV", "production")
+    FLASK_ENV = _SETTINGS["FLASK_ENV"]
 
     # Behind a proxy in production, force HTTPS in generated URLs
-    PREFERRED_URL_SCHEME = "https" if FLASK_ENV == "production" else "http"
+    PREFERRED_URL_SCHEME = _SETTINGS["PREFERRED_URL_SCHEME"]
 
     @staticmethod
     def parse_cors_origins():
