@@ -92,6 +92,10 @@ class Config:
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
+    # Hard cap on any request body (413 beyond it). The largest legitimate
+    # payload is a card, bounded far below this by the per-field caps.
+    MAX_CONTENT_LENGTH = 64 * 1024
+
     # Header only: a cookie is sent by the browser on cross-site requests on
     # its own, so accepting the JWT from one would make every route CSRF-able.
     JWT_TOKEN_LOCATION = ["headers"]
