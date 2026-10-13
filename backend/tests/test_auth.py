@@ -6,6 +6,7 @@ handling, header-only JWT authentication, and the OAuth-only-user edge
 case (a user created via Google/GitHub has password=None and must not be
 able to log in with a password).
 """
+import pytest
 
 
 class TestRegister:
@@ -198,3 +199,81 @@ class TestJwtOnlyFromAuthorizationHeader:
         client.set_cookie("access_token_cookie", token)
         resp = client.get("/me/profile", headers={"Authorization": "Bearer not-a-jwt"})
         assert resp.status_code in (401, 422)
+
+
+class TestInputBounds:
+    """Length and type limits at the trust boundary: every failure is a 400
+    with a Spanish message, never a 500."""
+
+    @staticmethod
+    def _register(client, **overrides):
+        payload = {"name": "User", "email": "bounds@example.com", "password": "password123"}
+        payload.update(overrides)
+        return client.post("/auth/register", json=payload)
+
+    def test_register_password_over_72_bytes_returns_400(self, client, db):
+        resp = self._register(client, password="a" * 73)
+        assert resp.status_code == 400
+        assert "72 bytes" in resp.get_json()["error"]
+
+    def test_register_password_of_exactly_72_bytes_succeeds(self, client, db):
+        assert self._register(client, password="a" * 72).status_code == 201
+
+    def test_register_password_counts_utf8_bytes_not_characters(self, client, db):
+        # 37 two-byte characters: 37 characters but 74 bytes.
+        assert self._register(client, password="ñ" * 37).status_code == 400
+        # 36 two-byte characters: exactly 72 bytes.
+        assert self._register(client, password="ñ" * 36).status_code == 201
+
+    def test_login_password_over_72_bytes_returns_400(self, client, registered_user):
+        resp = client.post("/auth/login", json={"email": registered_user["email"], "password": "a" * 73})
+        assert resp.status_code == 400
+        assert "72 bytes" in resp.get_json()["error"]
+
+    def test_login_password_of_exactly_72_bytes_logs_in(self, client, db):
+        password = "b" * 72
+        self._register(client, email="long72@example.com", password=password)
+        resp = client.post("/auth/login", json={"email": "long72@example.com", "password": password})
+        assert resp.status_code == 200
+
+    def test_register_name_over_80_characters_returns_400(self, client, db):
+        resp = self._register(client, name="n" * 81)
+        assert resp.status_code == 400
+        assert "80" in resp.get_json()["error"]
+
+    def test_register_name_of_exactly_80_characters_succeeds(self, client, db):
+        assert self._register(client, name="n" * 80).status_code == 201
+
+    def test_register_name_is_stripped_before_the_length_check(self, client, db):
+        assert self._register(client, name="  " + "n" * 80 + "  ").status_code == 201
+
+    def test_register_blank_name_returns_400(self, client, db):
+        assert self._register(client, name="   ").status_code == 400
+
+    def test_register_email_over_250_characters_returns_400(self, client, db):
+        email = "a" * 239 + "@example.com"  # 251 characters
+        assert len(email) == 251
+        resp = self._register(client, email=email)
+        assert resp.status_code == 400
+        assert "250" in resp.get_json()["error"]
+
+    def test_register_email_of_exactly_250_characters_succeeds(self, client, db):
+        email = "a" * 238 + "@example.com"
+        assert len(email) == 250
+        assert self._register(client, email=email).status_code == 201
+
+    def test_login_email_over_250_characters_returns_400(self, client, db):
+        resp = client.post("/auth/login", json={"email": "a" * 251, "password": "password123"})
+        assert resp.status_code == 400
+        assert "250" in resp.get_json()["error"]
+
+    @pytest.mark.parametrize("field", ["name", "email", "password"])
+    @pytest.mark.parametrize("value", [123, ["x"], {"a": 1}, True])
+    def test_register_non_string_fields_return_400(self, client, db, field, value):
+        assert self._register(client, **{field: value}).status_code == 400
+
+    @pytest.mark.parametrize("field", ["email", "password"])
+    @pytest.mark.parametrize("value", [123, ["x"], {"a": 1}])
+    def test_login_non_string_fields_return_400(self, client, db, field, value):
+        payload = {"email": "a@example.com", "password": "password123", field: value}
+        assert client.post("/auth/login", json=payload).status_code == 400
