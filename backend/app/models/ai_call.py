@@ -30,7 +30,7 @@ class AICall(db.Model):
     completion_tokens = db.Column(db.Integer, nullable=True)
     total_tokens = db.Column(db.Integer, nullable=True)
     # ok | rate_limited | timeout | connection_error | api_error
-    # | unexpected_error | unreadable_json
+    # | unexpected_error | unreadable_json | unusable_output
     status = db.Column(db.String(20), nullable=False)
     http_status = db.Column(db.Integer, nullable=True)
     error_type = db.Column(db.String(80), nullable=True)

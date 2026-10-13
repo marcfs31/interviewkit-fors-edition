@@ -19,18 +19,11 @@ import pytest
 from app.services import ai_service
 from app.services.ai_service import (
     AIUnavailableError,
-    CODE_QUESTIONS_COUNT,
     EMPTY_CARD,
-    EMPTY_FEEDBACK,
-    FALLBACK_CODE_QUESTIONS,
-    FALLBACK_QUESTIONS,
-    FALLBACK_THEORY_QUESTIONS,
     MAX_QUESTION_ATTEMPTS,
-    THEORY_QUESTIONS_COUNT,
     _parse_ai_json,
     _safe_card,
     _safe_feedback,
-    _safe_questions,
     fix_literal_escapes,
     generate_feedback,
     generate_questions,
@@ -95,41 +88,51 @@ class TestParseAiJson:
         assert _parse_ai_json(raw) == {"code": "line1\nline2"}
 
 
-class TestSafeCard:
-    """Tests for _safe_card (req. 3)."""
+# Every way a "card" can be unusable: wrong container, empty concept, wrong
+# field types (null included: a field is a string or it is absent).
+BAD_CARDS = [
+    None, "not-a-dict", 42, [], {},
+    {"concept": ""}, {"concept": "   "}, {"concept": 5}, {"concept": None},
+    {"definition": "no concept"},
+    {"concept": "C", "definition": 5},
+    {"concept": "C", "definition": None},
+    {"concept": "C", "code": ["a = 1"]},
+    {"concept": "C", "code_language": {"name": "python"}},
+    {"concept": "C", "tags": "async"},
+    {"concept": "C", "tags": None},
+    {"concept": "C", "tags": 123},
+    {"concept": "C", "tags": ["async", 3]},
+]
 
-    @pytest.mark.parametrize("value", [None, "not-a-dict", 42, []])
-    def test_non_dict_returns_empty_card_copy(self, value):
-        result = _safe_card(value)
-        assert result == EMPTY_CARD
-        assert result is not EMPTY_CARD  # a copy, not the shared constant
-        result["concept"] = "mutated"
-        assert EMPTY_CARD["concept"] == ""  # constant untouched
+
+class TestSafeCard:
+    """Tests for _safe_card: fills absent optional fields, rejects wrong types."""
 
     def test_fills_missing_fields_and_keeps_provided_ones(self):
         result = _safe_card({"concept": "Closures", "code": "x = 1"})
         assert result["concept"] == "Closures"
         assert result["code"] == "x = 1"
-        # Missing fields fall back to EMPTY_CARD defaults.
+        # Absent optional fields fall back to EMPTY_CARD defaults.
         assert result["definition"] == EMPTY_CARD["definition"]
         assert result["explanation"] == EMPTY_CARD["explanation"]
         assert result["code_language"] == EMPTY_CARD["code_language"]
+        assert result["tags"] == []
 
-    def test_none_values_fall_back_to_defaults(self):
-        result = _safe_card({"concept": None, "definition": None})
-        assert result["concept"] == ""
-        assert result["definition"] == ""
+    def test_result_is_a_copy_that_never_aliases_the_shared_defaults(self):
+        result = _safe_card({"concept": "Closures"})
+        assert result is not EMPTY_CARD
+        result["tags"].append("mutated")
+        result["definition"] = "mutated"
+        assert EMPTY_CARD["tags"] == []
+        assert EMPTY_CARD["definition"] == ""
 
-    def test_tags_forced_to_list_when_not_a_list(self):
-        assert _safe_card({"tags": "async"})["tags"] == []
-        assert _safe_card({"tags": 123})["tags"] == []
-        assert _safe_card({"tags": None})["tags"] == []
-
-    def test_tags_list_is_preserved(self):
-        assert _safe_card({"tags": ["async", "promises"]})["tags"] == ["async", "promises"]
+    def test_tags_list_of_strings_is_preserved(self):
+        assert _safe_card({"concept": "C", "tags": ["async", "promises"]})["tags"] == ["async", "promises"]
+        assert _safe_card({"concept": "C", "tags": []})["tags"] == []
 
     def test_applies_fix_literal_escapes_to_text_fields(self):
         result = _safe_card({
+            "concept": "C",
             "definition": "a\\nb",
             "explanation": "c\\nd",
             "use_case": "e\\nf",
@@ -144,111 +147,87 @@ class TestSafeCard:
         assert result["mnemonic"] == "i\nj"
         assert result["code"] == "x = 1\ny = 2\tz = 3"
 
+    @pytest.mark.parametrize("card", BAD_CARDS, ids=repr)
+    def test_unusable_card_is_rejected(self, card):
+        with pytest.raises(ValueError):
+            _safe_card(card)
+
+
+def _good_feedback(**overrides):
+    return {"result": "CORRECT", "feedback": "ok", "card": {"concept": "Closures"}, **overrides}
+
 
 class TestSafeFeedback:
-    """Tests for _safe_feedback (req. 4)."""
-
-    @pytest.mark.parametrize("value", [None, "oops", 7])
-    def test_non_dict_returns_empty_feedback_copy(self, value):
-        result = _safe_feedback(value)
-        assert result == EMPTY_FEEDBACK
-        assert result is not EMPTY_FEEDBACK
-        result["feedback"] = "mutated"
-        assert EMPTY_FEEDBACK["feedback"] != "mutated"
+    """Tests for _safe_feedback: a grade is either exactly valid or rejected."""
 
     @pytest.mark.parametrize("raw,expected", [
         ("CORRECT", "CORRECT"),
         ("PARTIALLY_CORRECT", "PARTIALLY_CORRECT"),
         ("INCORRECT", "INCORRECT"),
         ("correct", "CORRECT"),  # lowercased input is upper-cased
-        ("MAYBE", "PARTIALLY_CORRECT"),
-        ("PARTIAL", "PARTIALLY_CORRECT"),
-        ("", "PARTIALLY_CORRECT"),
+        ("  Incorrect \n", "INCORRECT"),  # and surrounding whitespace is stripped
+        ("partially_correct", "PARTIALLY_CORRECT"),
     ])
-    def test_result_normalized_to_one_of_three_valid_values(self, raw, expected):
-        data = _safe_feedback({"result": raw, "feedback": "ok", "card": {}})
-        assert data["result"] == expected
+    def test_valid_result_is_normalized(self, raw, expected):
+        assert _safe_feedback(_good_feedback(result=raw))["result"] == expected
 
-    def test_missing_result_key_defaults_to_partially_correct(self):
-        data = _safe_feedback({"feedback": "ok"})
-        assert data["result"] == "PARTIALLY_CORRECT"
+    @pytest.mark.parametrize("raw", [
+        "MAYBE", "PARTIAL", "CORRECT.", "PARTIALLY CORRECT", "", "   ",
+        None, 3, True, ["CORRECT"], {"value": "CORRECT"},
+    ], ids=repr)
+    def test_invalid_result_is_rejected_instead_of_defaulting(self, raw):
+        with pytest.raises(AIUnavailableError) as exc_info:
+            _safe_feedback(_good_feedback(result=raw))
+        assert exc_info.value.status == 502
 
-    @pytest.mark.parametrize("feedback", [None, "", False])
-    def test_empty_feedback_falls_back_to_default_message(self, feedback):
-        data = _safe_feedback({"result": "CORRECT", "feedback": feedback})
-        assert data["feedback"] == EMPTY_FEEDBACK["feedback"]
+    def test_missing_result_key_is_rejected(self):
+        data = _good_feedback()
+        del data["result"]
+        with pytest.raises(AIUnavailableError) as exc_info:
+            _safe_feedback(data)
+        assert exc_info.value.status == 502
 
-    def test_missing_card_falls_back_to_empty_card(self):
-        data = _safe_feedback({"result": "INCORRECT", "feedback": "bad"})
-        assert data["card"] == EMPTY_CARD
+    @pytest.mark.parametrize("feedback", [None, "", "   ", False, 5, ["bien"], {"text": "bien"}], ids=repr)
+    def test_unusable_feedback_is_rejected(self, feedback):
+        with pytest.raises(AIUnavailableError) as exc_info:
+            _safe_feedback(_good_feedback(feedback=feedback))
+        assert exc_info.value.status == 502
+
+    def test_missing_feedback_key_is_rejected(self):
+        data = _good_feedback()
+        del data["feedback"]
+        with pytest.raises(AIUnavailableError):
+            _safe_feedback(data)
+
+    def test_missing_card_is_rejected(self):
+        data = _good_feedback()
+        del data["card"]
+        with pytest.raises(AIUnavailableError) as exc_info:
+            _safe_feedback(data)
+        assert exc_info.value.status == 502
+
+    @pytest.mark.parametrize("card", BAD_CARDS, ids=repr)
+    def test_unusable_card_is_rejected(self, card):
+        with pytest.raises(AIUnavailableError) as exc_info:
+            _safe_feedback(_good_feedback(card=card))
+        assert exc_info.value.status == 502
+
+    @pytest.mark.parametrize("value", [None, "oops", 7, []], ids=repr)
+    def test_non_dict_is_rejected(self, value):
+        with pytest.raises(AIUnavailableError) as exc_info:
+            _safe_feedback(value)
+        assert exc_info.value.status == 502
 
     def test_valid_card_is_normalized_through_safe_card(self):
-        data = _safe_feedback({
-            "result": "CORRECT",
-            "feedback": "great",
-            "card": {"concept": "Hooks", "tags": "not-a-list", "code": "a\\nb"},
-        })
+        data = _safe_feedback(_good_feedback(
+            result="CORRECT", feedback="great",
+            card={"concept": "Hooks", "tags": ["react"], "code": "a\\nb"},
+        ))
+        assert data["feedback"] == "great"
         assert data["card"]["concept"] == "Hooks"
-        assert data["card"]["tags"] == []
+        assert data["card"]["tags"] == ["react"]
         assert data["card"]["code"] == "a\nb"
-        assert data["card"]["definition"] == ""  # filled from EMPTY_CARD
-
-
-class TestSafeQuestions:
-    """Tests for _safe_questions (req. 5)."""
-
-    @pytest.mark.parametrize("value", [None, "x", 3, []])
-    def test_non_dict_returns_full_fallback(self, value):
-        # NOTE: do not mutate the result here -- dict(FALLBACK_QUESTIONS) is
-        # a shallow copy, so appending to result["theory"] would pollute the
-        # shared module-level list and break later tests.
-        assert _safe_questions(value) == FALLBACK_QUESTIONS
-
-    def test_empty_dict_returns_both_fallback_blocks(self):
-        assert _safe_questions({}) == FALLBACK_QUESTIONS
-
-    def test_missing_code_block_uses_fallback_for_code_only(self):
-        result = _safe_questions({"theory": ["T1", "T2"]})
-        assert result["theory"] == ["T1", "T2"]
-        assert result["code"] == FALLBACK_CODE_QUESTIONS
-
-    def test_empty_code_list_uses_fallback_for_code_only(self):
-        result = _safe_questions({"theory": ["T1", "T2"], "code": []})
-        assert result["theory"] == ["T1", "T2"]
-        assert result["code"] == FALLBACK_CODE_QUESTIONS
-
-    def test_valid_both_blocks_are_returned_as_is(self):
-        data = {"theory": ["T1", "T2"], "code": ["C1", "C2", "C3"]}
-        assert _safe_questions(data) == data
-
-    def test_non_list_block_uses_fallback(self):
-        result = _safe_questions({"theory": "not-a-list", "code": ["C1", "C2", "C3"]})
-        assert result["theory"] == FALLBACK_THEORY_QUESTIONS
-        assert result["code"] == ["C1", "C2", "C3"]
-
-    def test_short_block_is_completed_from_fallback(self):
-        result = _safe_questions({"theory": ["T1"], "code": ["C1"]})
-        assert len(result["theory"]) == THEORY_QUESTIONS_COUNT
-        assert len(result["code"]) == CODE_QUESTIONS_COUNT
-        assert result["theory"][0] == "T1"
-        assert result["code"][0] == "C1"
-        assert result["code"][1:] == FALLBACK_CODE_QUESTIONS[:CODE_QUESTIONS_COUNT - 1]
-
-    def test_extra_questions_are_dropped(self):
-        result = _safe_questions({
-            "theory": ["T1", "T2", "T3"],
-            "code": ["C1", "C2", "C3", "C4"],
-        })
-        assert result["theory"] == ["T1", "T2"]
-        assert result["code"] == ["C1", "C2", "C3"]
-
-    def test_blank_and_non_string_items_are_discarded(self):
-        result = _safe_questions({
-            "theory": ["T1", "  ", None, 5, "T2"],
-            "code": ["C1", "", {"a": 1}, "C2", "C3"],
-        })
-        assert result["theory"] == ["T1", "T2"]
-        assert result["code"] == ["C1", "C2", "C3"]
+        assert data["card"]["definition"] == ""  # absent: filled from EMPTY_CARD
 
 
 class TestGenerateQuestions:
@@ -282,13 +261,12 @@ class TestGenerateQuestions:
             return responses[idx] if idx < len(responses) else responses[-1]
 
         monkeypatch.setattr(ai_service, "_fetch_questions", fake_fetch)
-        # Both attempts incomplete -> loop runs MAX times, then normalizes
-        # the LAST parsed value (theory kept, code falls back).
-        result = generate_questions("Python", "Básico", None)
+        # Both attempts incomplete: the loop runs MAX times, then gives up.
+        with pytest.raises(AIUnavailableError) as exc_info:
+            generate_questions("Python", "Básico", None)
 
         assert calls["n"] == MAX_QUESTION_ATTEMPTS
-        assert result["theory"] == ["T1", "T2"]
-        assert result["code"] == FALLBACK_CODE_QUESTIONS
+        assert exc_info.value.status == 502
 
     def test_success_on_second_attempt(self, monkeypatch):
         responses = [
@@ -326,10 +304,10 @@ class TestGenerateQuestions:
         assert calls["n"] == 2
         assert result == {"theory": ["T1", "T2"], "code": ["C1", "C2", "C3"]}
 
-    def test_incomplete_attempts_are_completed_with_the_best_one(self, monkeypatch):
+    def test_incomplete_attempts_are_never_padded_even_when_nearly_complete(self, monkeypatch):
         responses = [
             {"theory": ["T1"], "code": ["C1"]},
-            {"theory": ["T1", "T2"], "code": ["C1", "C2"]},  # more complete
+            {"theory": ["T1", "T2"], "code": ["C1", "C2"]},  # 4 of 5: still short
         ]
         calls = {"n": 0}
 
@@ -339,11 +317,12 @@ class TestGenerateQuestions:
             return responses[idx]
 
         monkeypatch.setattr(ai_service, "_fetch_questions", fake_fetch)
-        result = generate_questions("Python", "Básico", None)
 
-        assert len(result["theory"]) == THEORY_QUESTIONS_COUNT
-        assert len(result["code"]) == CODE_QUESTIONS_COUNT
-        assert result["code"][:2] == ["C1", "C2"]
+        with pytest.raises(AIUnavailableError) as exc_info:
+            generate_questions("Python", "Básico", None)
+
+        assert calls["n"] == MAX_QUESTION_ATTEMPTS
+        assert exc_info.value.status == 502
 
     def test_extra_questions_from_the_ai_are_trimmed(self, monkeypatch):
         monkeypatch.setattr(
@@ -382,16 +361,63 @@ class TestGenerateQuestions:
 
         assert exc_info.value.status == 502
 
-    def test_partial_output_is_still_completed_with_fallback_questions(self, monkeypatch):
+    @pytest.mark.parametrize("payload", [
+        {"theory": ["T1"], "code": []},
+        {"theory": ["T1", "T2"], "code": ["C1", "C2"]},
+        {"theory": ["T1", "  "], "code": ["C1", "C2", "C3"]},  # a blank one does not count
+        {"theory": ["T1", None], "code": ["C1", "C2", "C3"]},
+        {"theory": "not-a-list", "code": ["C1", "C2", "C3"]},
+        {"theory": ["T1", "T2"], "code": {"a": "b"}},
+    ], ids=repr)
+    def test_partial_output_raises_502_instead_of_being_padded(self, monkeypatch, payload):
+        calls = {"n": 0}
+
+        def fake_fetch(stack, level, topic):
+            calls["n"] += 1
+            return payload
+
+        monkeypatch.setattr(ai_service, "_fetch_questions", fake_fetch)
+
+        with pytest.raises(AIUnavailableError) as exc_info:
+            generate_questions("Python", "Básico", None)
+
+        assert exc_info.value.status == 502
+        assert calls["n"] == MAX_QUESTION_ATTEMPTS
+
+    def test_sql_stack_never_receives_generic_closures_questions(self, monkeypatch):
         monkeypatch.setattr(
-            ai_service, "_fetch_questions", lambda *a: {"theory": ["T1"], "code": []}
+            ai_service, "_fetch_questions", lambda *a: {"theory": ["¿Qué es un JOIN?"], "code": []}
         )
+
+        with pytest.raises(AIUnavailableError) as exc_info:
+            generate_questions("SQL", "Básico", "JOINs")
+
+        assert exc_info.value.status == 502
+
+    def test_sql_questions_come_only_from_the_model(self, monkeypatch):
+        sql = {
+            "theory": ["¿Qué es un JOIN?", "¿Cuándo usar un índice?"],
+            "code": ["Q1 SELECT", "Q2 GROUP BY", "Q3 HAVING"],
+        }
+        monkeypatch.setattr(ai_service, "_fetch_questions", lambda *a: dict(sql))
+
+        result = generate_questions("SQL", "Básico", "JOINs")
+
+        assert result == sql
+        assert "closure" not in json.dumps(result).lower()
+
+    def test_blank_and_non_string_items_are_discarded_before_counting(self, monkeypatch):
+        monkeypatch.setattr(ai_service, "_fetch_questions", lambda *a: {
+            "theory": ["T1", "  ", None, 5, " T2 "],
+            "code": ["C1", "", {"a": 1}, "C2", "C3"],
+        })
 
         result = generate_questions("Python", "Básico", None)
 
-        assert result["theory"][0] == "T1"
-        assert len(result["theory"]) == THEORY_QUESTIONS_COUNT
-        assert result["code"] == FALLBACK_CODE_QUESTIONS
+        assert result == {"theory": ["T1", "T2"], "code": ["C1", "C2", "C3"]}
+
+    def test_fallback_questions_no_longer_exist(self):
+        assert not [name for name in dir(ai_service) if name.startswith("FALLBACK")]
 
     def test_provider_error_propagates_without_retrying(self, monkeypatch):
         calls = {"n": 0}
@@ -454,7 +480,7 @@ class TestGenerateFeedback:
         payload = {
             "result": "correct",  # lower-case: must be upper-cased
             "feedback": "Bien hecho.",
-            "card": {"concept": "Closures", "tags": "oops", "code": "a\\nb"},
+            "card": {"concept": "Closures", "tags": ["js"], "code": "a\\nb"},
         }
         create = _stub_create(
             monkeypatch, lambda **kwargs: _completion(json.dumps(payload))
@@ -465,7 +491,7 @@ class TestGenerateFeedback:
         assert data["result"] == "CORRECT"
         assert data["feedback"] == "Bien hecho."
         assert data["card"]["concept"] == "Closures"
-        assert data["card"]["tags"] == []
+        assert data["card"]["tags"] == ["js"]
         assert data["card"]["code"] == "a\nb"
         assert create.call_count == 1
 
@@ -473,7 +499,7 @@ class TestGenerateFeedback:
         create = _stub_create(
             monkeypatch,
             lambda **kwargs: _completion(json.dumps(
-                {"result": "INCORRECT", "feedback": "mala", "card": {}}
+                {"result": "INCORRECT", "feedback": "mala", "card": {"concept": "C"}}
             )),
         )
 
@@ -496,7 +522,7 @@ class TestGenerateFeedback:
         create = _stub_create(
             monkeypatch,
             lambda **kwargs: _completion(json.dumps(
-                {"result": "INCORRECT", "feedback": "mala", "card": {}}
+                {"result": "INCORRECT", "feedback": "mala", "card": {"concept": "C"}}
             )),
         )
 
@@ -510,7 +536,7 @@ class TestGenerateFeedback:
         create = _stub_create(
             monkeypatch,
             lambda **kwargs: _completion(json.dumps(
-                {"result": "INCORRECT", "feedback": "mala", "card": {}}
+                {"result": "INCORRECT", "feedback": "mala", "card": {"concept": "C"}}
             )),
         )
 
@@ -558,17 +584,23 @@ class TestGenerateFeedback:
         assert exc_info.value.status == 429
         assert exc_info.value.retry_after == 42
 
-    def test_valid_object_with_odd_fields_is_still_normalized(self, monkeypatch):
-        _stub_create(
-            monkeypatch,
-            lambda **kwargs: _completion(json.dumps({"result": "maybe", "feedback": "", "card": "x"})),
-        )
+    @pytest.mark.parametrize("payload", [
+        {"result": "maybe", "feedback": "", "card": "x"},
+        {"result": None, "feedback": "ok", "card": {"concept": "C"}},
+        {"result": {"v": "CORRECT"}, "feedback": "ok", "card": {"concept": "C"}},
+        {"result": "CORRECT", "feedback": ["ok"], "card": {"concept": "C"}},
+        {"result": "CORRECT", "feedback": "ok", "card": {"concept": ""}},
+        {"result": "CORRECT", "feedback": "ok", "card": {"concept": "C", "code": 5}},
+        {"feedback": "ok", "card": {"concept": "C"}},
+        {},
+    ], ids=repr)
+    def test_dict_with_unusable_content_raises_instead_of_faking_a_grade(self, monkeypatch, payload):
+        _stub_create(monkeypatch, lambda **kwargs: _completion(json.dumps(payload)))
 
-        data = generate_feedback("Python", "Q?", "A")
+        with pytest.raises(AIUnavailableError) as exc_info:
+            generate_feedback("Python", "Q?", "A")
 
-        assert data["result"] == "PARTIALLY_CORRECT"
-        assert data["feedback"] == EMPTY_FEEDBACK["feedback"]
-        assert data["card"] == EMPTY_CARD
+        assert exc_info.value.status == 502
 
 
 

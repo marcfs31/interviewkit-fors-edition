@@ -97,7 +97,8 @@ class AIUnavailableError(Exception):
         self.status = status
         self.retry_after = retry_after
 
-# Minimal shape of a valid AI feedback response, used as a fallback
+# Defaults for the OPTIONAL card fields the model left out. "concept" has no
+# default: a card without one is unusable output.
 EMPTY_CARD = {
     "concept": "",
     "definition": "",
@@ -110,11 +111,7 @@ EMPTY_CARD = {
     "tags": [],
 }
 
-EMPTY_FEEDBACK = {
-    "result": "PARTIALLY_CORRECT",
-    "feedback": "La IA no devolvio una respuesta valida. Por favor, intentalo de nuevo.",
-    "card": EMPTY_CARD,
-}
+VALID_RESULTS = ("CORRECT", "PARTIALLY_CORRECT", "INCORRECT")
 
 
 def _retry_after_seconds(error):
@@ -198,18 +195,19 @@ def _record_call(kind, started, status, completion=None, http_status=None, error
         _rollback_quietly()
 
 
-def _mark_unreadable_json():
-    """The HTTP call went fine but the model's output wasn't usable JSON:
-    downgrade the row written by the latest _call_groq."""
+def _mark_last_call(status):
+    """The HTTP call went fine but the model's output was not usable
+    ("unreadable_json" or "unusable_output"): downgrade the row written by
+    the latest _call_groq."""
     call_id = _last_call_id.get()
     if call_id is None:
         return
     try:
-        AICall.query.filter_by(id=call_id).update({"status": "unreadable_json"})
+        AICall.query.filter_by(id=call_id).update({"status": status})
         db.session.commit()
         _last_call_id.set(None)
     except Exception:
-        logger.warning("Could not mark the AI call as unreadable_json", exc_info=True)
+        logger.warning("Could not mark the AI call as %s", status, exc_info=True)
         _rollback_quietly()
 
 
@@ -284,49 +282,56 @@ def _parse_ai_json(raw_content):
 
 
 def _safe_card(card_data):
-    """Returns a card dict with every expected field, filling in whatever is missing."""
+    """Returns a card dict with every expected field. Optional fields the model
+    left out get their default; a wrong type anywhere, or a missing or blank
+    "concept", raises ValueError (the card is unusable, never patched up)."""
     if not isinstance(card_data, dict):
-        return dict(EMPTY_CARD)
-    safe = dict(EMPTY_CARD)
-    for key in safe.keys():
-        if key in card_data and card_data[key] is not None:
-            safe[key] = card_data[key]
-    if not isinstance(safe["tags"], list):
-        safe["tags"] = []
+        raise ValueError("card is not an object")
+    concept = card_data.get("concept")
+    if not isinstance(concept, str) or not concept.strip():
+        raise ValueError("card concept is missing or blank")
+    safe = {**EMPTY_CARD, "tags": []}
+    for key in safe:
+        if key not in card_data:
+            continue
+        value = card_data[key]
+        if key == "tags":
+            if not isinstance(value, list) or not all(isinstance(tag, str) for tag in value):
+                raise ValueError("card tags is not a list of strings")
+        elif not isinstance(value, str):
+            raise ValueError(f"card {key} is not a string")
+        safe[key] = value
     for key in ("definition", "explanation", "use_case", "avoid_when", "mnemonic", "code"):
         safe[key] = fix_literal_escapes(safe[key])
     return safe
 
 
+def _unusable_feedback(reason):
+    """Readable JSON whose content cannot be used as a grade: records the
+    ai_call row as "unusable_output" and returns the 502 for the caller to raise."""
+    logger.warning("Groq feedback: unusable model output (%s)", reason)
+    _mark_last_call("unusable_output")
+    return AIUnavailableError("La IA no devolvió una corrección válida. Inténtalo de nuevo.", status=502)
+
+
 def _safe_feedback(data):
-    """Normalizes the AI response to the expected shape, with fallbacks."""
+    """Validates the AI grading and returns {"result", "feedback", "card"}.
+    Anything that is not exactly a valid grade raises AIUnavailableError(502):
+    a missing or invalid result must never become a made-up grade."""
     if not isinstance(data, dict):
-        return dict(EMPTY_FEEDBACK)
-    result = data.get("result", "").upper()
-    if result not in ("CORRECT", "PARTIALLY_CORRECT", "INCORRECT"):
-        result = "PARTIALLY_CORRECT"
-    return {
-        "result": result,
-        "feedback": data.get("feedback") or EMPTY_FEEDBACK["feedback"],
-        "card": _safe_card(data.get("card")),
-    }
-
-
-FALLBACK_THEORY_QUESTIONS = [
-    "Explica que son las closures y en que casos usarlas en el contexto del stack seleccionado.",
-    "¿Cuál es la diferencia entre copia superficial (shallow copy) y copia profunda (deep copy)?",
-]
-
-FALLBACK_CODE_QUESTIONS = [
-    "Escribe una función que recorra un array y devuelva un nuevo array transformado.",
-    "Describe el patrón más común para manejar errores asíncronos en este stack con un ejemplo de código.",
-    "Escribe una función que reciba una lista de números y devuelva la suma de los pares.",
-]
-
-FALLBACK_QUESTIONS = {
-    "theory": list(FALLBACK_THEORY_QUESTIONS),
-    "code": list(FALLBACK_CODE_QUESTIONS),
-}
+        raise _unusable_feedback("not an object")
+    raw_result = data.get("result")
+    result = raw_result.strip().upper() if isinstance(raw_result, str) else None
+    if result not in VALID_RESULTS:
+        raise _unusable_feedback("result is not CORRECT, PARTIALLY_CORRECT or INCORRECT")
+    feedback = data.get("feedback")
+    if not isinstance(feedback, str) or not feedback.strip():
+        raise _unusable_feedback("feedback is missing or blank")
+    try:
+        card = _safe_card(data.get("card"))
+    except ValueError as error:
+        raise _unusable_feedback(str(error)) from error
+    return {"result": result, "feedback": feedback, "card": card}
 
 
 def _clean_block(items):
@@ -334,29 +339,6 @@ def _clean_block(items):
     if not isinstance(items, list):
         return []
     return [item.strip() for item in items if isinstance(item, str) and item.strip()]
-
-
-def _fit_block(items, count, fallback):
-    """Returns exactly `count` questions: extras are dropped and any missing
-    ones are filled in from the generic fallback questions."""
-    block = _clean_block(items)[:count]
-    for question in fallback:
-        if len(block) >= count:
-            break
-        if question not in block:
-            block.append(question)
-    return block
-
-
-def _safe_questions(data):
-    """Normalizes the AI response to exactly THEORY_QUESTIONS_COUNT theory +
-    CODE_QUESTIONS_COUNT code questions, filling gaps from the fallback."""
-    if not isinstance(data, dict):
-        return dict(FALLBACK_QUESTIONS)
-    return {
-        "theory": _fit_block(data.get("theory"), THEORY_QUESTIONS_COUNT, FALLBACK_THEORY_QUESTIONS),
-        "code": _fit_block(data.get("code"), CODE_QUESTIONS_COUNT, FALLBACK_CODE_QUESTIONS),
-    }
 
 
 MAX_QUESTION_ATTEMPTS = 2
@@ -386,42 +368,42 @@ def _fetch_questions(stack, level, topic):
         return _parse_ai_json(chat_completion.choices[0].message.content)
     except (ValueError, TypeError, AttributeError, IndexError):
         logger.warning("Groq questions: unreadable JSON in the model output")
-        _mark_unreadable_json()
+        _mark_last_call("unreadable_json")
         return None
 
 
 def generate_questions(stack, level, topic):
     """Generates questions via AI: THEORY_QUESTIONS_COUNT theory + CODE_QUESTIONS_COUNT code.
     Retries up to MAX_QUESTION_ATTEMPTS times if the model's output is unreadable
-    or has fewer questions than required in either block. Generic fallback
-    questions only fill gaps in an otherwise usable answer. Provider errors
-    are never retried (retrying a 429 only burns more quota).
+    or has fewer valid questions than required in either block. Questions are
+    never invented to fill a gap. Provider errors are never retried (retrying
+    a 429 only burns more quota).
     Returns {"theory": [...], "code": [...]} with exactly the required counts.
     Raises AIUnavailableError: the provider's own error, or 502 when no
-    attempt produced anything usable."""
-    best = None
-    best_size = 0
+    attempt produced the full set."""
     for attempt in range(1, MAX_QUESTION_ATTEMPTS + 1):
         with ai_call_context(stack=stack, level=level, topic=topic, attempt=attempt):
             parsed = _fetch_questions(stack, level, topic)
             if parsed is not None and not isinstance(parsed, dict):
                 # Valid JSON but not the {"theory", "code"} object we asked for.
-                _mark_unreadable_json()
+                _mark_last_call("unreadable_json")
         if not isinstance(parsed, dict):
             continue
         theory = _clean_block(parsed.get("theory"))
         code = _clean_block(parsed.get("code"))
         if len(theory) >= THEORY_QUESTIONS_COUNT and len(code) >= CODE_QUESTIONS_COUNT:
-            return _safe_questions(parsed)
-        # Keep the most complete incomplete attempt to fill its gaps with fallbacks
-        size = min(len(theory), THEORY_QUESTIONS_COUNT) + min(len(code), CODE_QUESTIONS_COUNT)
-        if size > best_size:
-            best, best_size = parsed, size
-    if best is None:
-        raise AIUnavailableError(
-            "La IA no devolvió preguntas válidas. Inténtalo de nuevo.", status=502
+            return {
+                "theory": theory[:THEORY_QUESTIONS_COUNT],
+                "code": code[:CODE_QUESTIONS_COUNT],
+            }
+        logger.warning(
+            "Groq questions: attempt %s gave %s theory and %s code questions",
+            attempt, len(theory), len(code),
         )
-    return _safe_questions(best)
+        _mark_last_call("unusable_output")
+    raise AIUnavailableError(
+        "La IA no devolvió preguntas válidas. Inténtalo de nuevo.", status=502
+    )
 
 
 _ANSWER_DELIMITER_RE = re.compile(r"#{3}\s*ANSWER_(?:START|END)\s*#{3}", re.IGNORECASE)
@@ -462,13 +444,13 @@ def generate_feedback(stack, question, answer, question_type="code"):
         parsed = _parse_ai_json(chat_completion.choices[0].message.content)
     except (ValueError, TypeError, AttributeError, IndexError) as error:
         logger.warning("Groq feedback: unreadable JSON in the model output")
-        _mark_unreadable_json()
+        _mark_last_call("unreadable_json")
         raise AIUnavailableError(
             "La IA no devolvió una corrección válida. Inténtalo de nuevo.", status=502
         ) from error
     if not isinstance(parsed, dict):
         logger.warning("Groq feedback: the model output is not a JSON object")
-        _mark_unreadable_json()
+        _mark_last_call("unreadable_json")
         raise AIUnavailableError(
             "La IA no devolvió una corrección válida. Inténtalo de nuevo.", status=502
         )
