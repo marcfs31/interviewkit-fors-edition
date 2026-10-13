@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { EditorView, keymap, placeholder as placeholderExt } from "@codemirror/view";
 import { EditorState, Compartment, type Extension } from "@codemirror/state";
 import { defaultKeymap, indentWithTab } from "@codemirror/commands";
@@ -112,6 +112,7 @@ export default function CodeEditor({
   stack = "",
 }: CodeEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
+  const hintId = useId();
   const viewRef = useRef<EditorView | null>(null);
   // The view is created once; the listener must read the latest handler, not the first render's.
   const onChangeRef = useRef(onChange);
@@ -143,6 +144,8 @@ export default function CodeEditor({
         githubTheme,
         editorTheme,
         placeholderExt(placeholder),
+        // The name and description belong on the editable surface, which is what screen readers focus
+        EditorView.contentAttributes.of({ "aria-label": ariaLabel, "aria-describedby": hintId }),
         updateListener,
       ],
     });
@@ -215,7 +218,10 @@ export default function CodeEditor({
           <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
         </div>
       </div>
-      <div ref={editorRef} className="w-full" role="textbox" aria-label={ariaLabel} aria-multiline="true" />
+      <div ref={editorRef} className="w-full" />
+      <p id={hintId} className="mt-1.5 text-xs text-muted-foreground">
+        Pulsa Esc y luego Tab para salir del editor
+      </p>
     </div>
   );
 }
