@@ -9,6 +9,7 @@ Thanks for your interest in improving InterviewKit! Bug reports, ideas and pull 
 - [Making changes](#making-changes)
 - [Checks that must pass](#checks-that-must-pass)
 - [Commit messages](#commit-messages)
+- [Versioning and changelog](#versioning-and-changelog)
 - [Opening a pull request](#opening-a-pull-request)
 - [Security issues](#security-issues)
 
@@ -88,6 +89,14 @@ feat: add light/dark theme toggle with a proper light color palette
 fix: normalize literal escape sequences in AI-generated card text
 ci: add GitHub Actions workflow running pytest and npm test
 ```
+
+## Versioning and changelog
+
+The project follows [Semantic Versioning](https://semver.org). Before 1.0, a breaking change bumps the minor version (`0.1.0` to `0.2.0`) and a fix bumps the patch (`0.1.0` to `0.1.1`).
+
+- Add one changelog fragment per pull request: `changelog.d/<branch-slug>.md`, with [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) headings. See [`changelog.d/README.md`](changelog.d/README.md).
+- Do not edit `CHANGELOG.md` in a normal pull request. The `chore(release): X.Y.Z` commit compiles the fragments into it.
+- There is a single version, kept identical in `backend/app/version.py` and `frontend/package.json` (and the top of `frontend/package-lock.json`). It is only changed by the release commit, and `GET /health` reports it.
 
 ## Opening a pull request
 
