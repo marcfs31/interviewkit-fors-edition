@@ -1,7 +1,10 @@
+import secrets
+
 from flask import Blueprint, redirect, url_for, current_app, request, jsonify
 from flask_jwt_extended import create_access_token
 from authlib.integrations.flask_client import OAuth
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+from sqlalchemy import func, update
 from sqlalchemy.exc import IntegrityError
 from ..models.user import User
 from ..models.oauth_account import OAuthAccount
@@ -25,20 +28,32 @@ def _code_serializer():
     return URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt=_OAUTH_CODE_SALT)
 
 
+def _normalize_email(email):
+    return email.strip().lower()
+
+
+def _user_by_email(email):
+    # func.lower so rows stored before emails were lowercased still match.
+    return User.query.filter(func.lower(User.email) == email).first()
+
+
 def _get_or_create_user(provider, provider_user_id, email, name):
+    # The caller passes a provider-verified address or a synthetic noreply one,
+    # never an unverified claim: this function links accounts by email.
+    email = _normalize_email(email)
     existing = OAuthAccount.query.filter_by(
         provider=provider, provider_user_id=provider_user_id
     ).first()
 
     if existing:
-        user = User.query.get(existing.user_id)
+        user = db.session.get(User, existing.user_id)
         if user is None:
             db.session.delete(existing)
             db.session.commit()
         else:
             return user
 
-    user_by_email = User.query.filter_by(email=email).first()
+    user_by_email = _user_by_email(email)
 
     if user_by_email:
         existing_link = OAuthAccount.query.filter_by(
@@ -55,7 +70,7 @@ def _get_or_create_user(provider, provider_user_id, email, name):
         db.session.flush()
     except IntegrityError:
         db.session.rollback()
-        user_by_email = User.query.filter_by(email=email).first()
+        user_by_email = _user_by_email(email)
         if user_by_email:
             return _get_or_create_user(provider, provider_user_id, email, name)
         raise
@@ -76,7 +91,7 @@ def _get_or_create_user(provider, provider_user_id, email, name):
             provider=provider, provider_user_id=provider_user_id
         ).first()
         if linked:
-            user = User.query.get(linked.user_id)
+            user = db.session.get(User, linked.user_id)
             if user:
                 return user
         return _get_or_create_user(provider, provider_user_id, email, name)
@@ -88,7 +103,12 @@ def _build_login_response(user):
     frontend_url = current_app.config["FRONTEND_URL"]
     # The code goes in the URL fragment: browsers never send fragments to a
     # server, so it stays out of access logs and Referer headers.
-    code = _code_serializer().dumps({"uid": user.user_id})
+    # Single use: only the latest nonce stored on the user can be redeemed, and
+    # redeeming it clears it. A newer login supersedes an unredeemed code.
+    nonce = secrets.token_urlsafe(32)
+    user.oauth_code_nonce = nonce
+    db.session.commit()
+    code = _code_serializer().dumps({"uid": user.user_id, "nonce": nonce})
     return redirect(f"{frontend_url}/auth/callback#code={code}")
 
 
@@ -105,9 +125,21 @@ def exchange_code():
     except (SignatureExpired, BadSignature):
         return jsonify({"error": "Codigo invalido o caducado"}), 401
 
-    user = db.session.get(User, payload.get("uid")) if isinstance(payload, dict) else None
-    if user is None:
+    uid = payload.get("uid") if isinstance(payload, dict) else None
+    nonce = payload.get("nonce") if isinstance(payload, dict) else None
+    if not isinstance(uid, int) or not isinstance(nonce, str) or not nonce:
         return jsonify({"error": "Codigo invalido o caducado"}), 401
+
+    consumed = db.session.execute(
+        update(User)
+        .where(User.user_id == uid, User.oauth_code_nonce == nonce)
+        .values(oauth_code_nonce=None)
+    )
+    db.session.commit()
+    if consumed.rowcount != 1:
+        return jsonify({"error": "Codigo invalido o caducado"}), 401
+
+    user = db.session.get(User, uid)
 
     expires_delta = current_app.config["JWT_ACCESS_TOKEN_EXPIRES"]
     access_token = create_access_token(identity=str(user.user_id), expires_delta=expires_delta)
@@ -148,7 +180,8 @@ def google_callback():
                 return redirect(f"{frontend_url}/login?error=oauth_failed")
 
         google_id = str(userinfo["sub"])
-        email = userinfo.get("email", "")
+        # `is True`: only an explicit boolean from Google vouches for the address.
+        email = userinfo.get("email") if userinfo.get("email_verified") is True else None
         if not email:
             email = f"google_{google_id}@users.noreply.google.com"
         name = userinfo.get("name", email.split("@")[0]) or f"Google User {google_id}"
@@ -198,16 +231,26 @@ def github_callback():
 
         github_id = str(profile["id"])
         name = profile.get("name") or profile.get("login", "") or f"GitHub User {github_id}"
+        verified_emails = []
         primary_email = None
 
         emails_resp = oauth.github.get("user/emails", token=token)
         if emails_resp.ok:
             for e in emails_resp.json():
-                if e.get("primary"):
-                    primary_email = e.get("email")
-                    break
+                address = e.get("email")
+                if not address or e.get("verified") is not True:
+                    continue
+                verified_emails.append(_normalize_email(address))
+                if e.get("primary") and primary_email is None:
+                    primary_email = address
 
-        email = primary_email or profile.get("email", "")
+        # The profile email is a free-text claim: trust it only if GitHub also
+        # lists it as a verified address.
+        profile_email = profile.get("email")
+        if not primary_email and profile_email and _normalize_email(profile_email) in verified_emails:
+            primary_email = profile_email
+
+        email = primary_email
         if not email:
             email = f"github_{github_id}@users.noreply.github.com"
 

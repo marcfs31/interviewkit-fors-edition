@@ -9,5 +9,7 @@ class User(db.Model):
     password = db.Column(db.String(250), nullable=True)
     total_xp = db.Column(db.Integer, nullable=False, default=0)
     level = db.Column(db.Integer, nullable=False, default=1)
+    # The one OAuth exchange code that may still be redeemed; cleared on use.
+    oauth_code_nonce = db.Column(db.String(64), nullable=True)
 
     oauth_accounts = db.relationship("OAuthAccount", backref="user", lazy="dynamic")
