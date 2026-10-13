@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ComponentType, type ReactNode } from "react";
+import { useId, useState, type ComponentType, type ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -221,6 +221,7 @@ export function CardView({ card, wasEdited }: { card: EditableCard; wasEdited?: 
 
 // Edit view: every field editable
 function CardEdit<T extends EditableCard>({ card, onChange }: { card: T; onChange: (card: T) => void }) {
+  const uid = useId();
   if (!card) return null;
 
   const updateField = <K extends keyof EditableCard>(field: K, value: EditableCard[K]) => {
@@ -246,10 +247,11 @@ function CardEdit<T extends EditableCard>({ card, onChange }: { card: T; onChang
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+        <Label htmlFor={`${uid}-concept`} className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
           Concepto
         </Label>
         <Input
+          id={`${uid}-concept`}
           value={card.concept || ""}
           onChange={(e) => updateField("concept", e.target.value)}
           maxLength={120}
@@ -258,13 +260,14 @@ function CardEdit<T extends EditableCard>({ card, onChange }: { card: T; onChang
       </div>
 
       <div className="space-y-2">
-        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-          Definicion
+        <Label htmlFor={`${uid}-definition`} className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+          Definición
           <span className="text-muted-foreground/60 normal-case font-normal ml-1">
             (1 frase)
           </span>
         </Label>
         <Input
+          id={`${uid}-definition`}
           value={card.definition || ""}
           onChange={(e) => updateField("definition", e.target.value)}
           placeholder="Definición técnica en una frase…"
@@ -272,15 +275,15 @@ function CardEdit<T extends EditableCard>({ card, onChange }: { card: T; onChang
       </div>
 
       <div className="space-y-2">
-        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-          Explicacion
+        <Label htmlFor={`${uid}-explanation`} className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+          Explicación
         </Label>
         <textarea
+          id={`${uid}-explanation`}
           value={card.explanation || ""}
           onChange={(e) => updateField("explanation", e.target.value)}
           rows={3}
           placeholder="Aclaración profunda del concepto…"
-          aria-label="Explicación del concepto"
           className={cn(
             "w-full rounded-lg border border-input bg-background px-3 py-2 text-sm resize-y transition-colors outline-none",
             "placeholder:text-muted-foreground",
@@ -290,16 +293,16 @@ function CardEdit<T extends EditableCard>({ card, onChange }: { card: T; onChang
       </div>
 
       <div className="space-y-2">
-        <Label className="text-xs font-semibold text-success uppercase tracking-wider flex items-center gap-1.5">
+        <Label htmlFor={`${uid}-use-case`} className="text-xs font-semibold text-success uppercase tracking-wider flex items-center gap-1.5">
           <CheckCircle2 className="size-3.5" />
           Usar cuando
         </Label>
         <textarea
+          id={`${uid}-use-case`}
           value={card.use_case || ""}
           onChange={(e) => updateField("use_case", e.target.value)}
           rows={2}
           placeholder="Caso de uso práctico…"
-          aria-label="Caso de uso"
           className={cn(
             "w-full rounded-lg border border-input bg-background px-3 py-2 text-sm resize-y transition-colors outline-none",
             "placeholder:text-muted-foreground",
@@ -309,7 +312,7 @@ function CardEdit<T extends EditableCard>({ card, onChange }: { card: T; onChang
       </div>
 
       <div className="space-y-2">
-        <Label className="text-xs font-semibold text-destructive uppercase tracking-wider flex items-center gap-1.5">
+        <Label htmlFor={`${uid}-avoid-when`} className="text-xs font-semibold text-destructive uppercase tracking-wider flex items-center gap-1.5">
           <XCircle className="size-3.5" />
           Evitar cuando
           <span className="text-muted-foreground/60 normal-case font-normal ml-1">
@@ -317,11 +320,11 @@ function CardEdit<T extends EditableCard>({ card, onChange }: { card: T; onChang
           </span>
         </Label>
         <textarea
+          id={`${uid}-avoid-when`}
           value={card.avoid_when || ""}
           onChange={(e) => updateField("avoid_when", e.target.value)}
           rows={2}
           placeholder="Cuándo NO usarlo…"
-          aria-label="Evitar cuando"
           className={cn(
             "w-full rounded-lg border border-input bg-background px-3 py-2 text-sm resize-y transition-colors outline-none",
             "placeholder:text-muted-foreground",
@@ -332,16 +335,15 @@ function CardEdit<T extends EditableCard>({ card, onChange }: { card: T; onChang
 
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-2">
-          <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-            Codigo
-          </Label>
+          <p className="text-xs font-semibold leading-none text-muted-foreground uppercase tracking-wider">
+            Código
+          </p>
           <div className="flex items-center gap-2">
-            <Label htmlFor="code-language-select" className="text-xs text-muted-foreground">Lenguaje:</Label>
+            <Label htmlFor={`${uid}-code-language`} className="text-xs text-muted-foreground">Lenguaje:</Label>
             <select
               value={card.code_language || "javascript"}
               onChange={(e) => updateField("code_language", e.target.value)}
-              id="code-language-select"
-              aria-label="Lenguaje de programación"
+              id={`${uid}-code-language`}
               className="px-2 py-1 rounded-md border border-input bg-background text-xs outline-none focus-visible:border-ring"
             >
               {LANGUAGE_OPTIONS.map((opt) => (
@@ -356,11 +358,12 @@ function CardEdit<T extends EditableCard>({ card, onChange }: { card: T; onChang
           value={card.code || ""}
           onChange={(value) => updateField("code", value)}
           placeholder="Pega tu snippet de código aquí…"
+          ariaLabel="Código"
         />
       </div>
 
       <div className="space-y-2">
-        <Label className="text-xs font-semibold text-foreground uppercase tracking-wider flex items-center gap-1.5">
+        <Label htmlFor={`${uid}-mnemonic`} className="text-xs font-semibold text-foreground uppercase tracking-wider flex items-center gap-1.5">
           <Lightbulb className="size-3.5" />
           Mnemotecnia
           <span className="text-muted-foreground/60 normal-case font-normal ml-1">
@@ -368,6 +371,7 @@ function CardEdit<T extends EditableCard>({ card, onChange }: { card: T; onChang
           </span>
         </Label>
         <Input
+          id={`${uid}-mnemonic`}
           value={card.mnemonic || ""}
           onChange={(e) => updateField("mnemonic", e.target.value)}
           maxLength={200}
@@ -376,16 +380,17 @@ function CardEdit<T extends EditableCard>({ card, onChange }: { card: T; onChang
       </div>
 
       <div className="space-y-2">
-        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+        <p className="text-xs font-semibold leading-none text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
           <Tag className="size-3.5" />
           Tags
-        </Label>
+        </p>
         <div className="space-y-2">
           {(card.tags || []).map((tag, i) => (
             <div key={i} className="flex items-center gap-2">
               <Input
                 value={tag}
                 onChange={(e) => updateTag(i, e.target.value)}
+                aria-label={`Etiqueta ${i + 1}`}
                 placeholder="tag-slug"
                 className="flex-1"
               />
@@ -394,7 +399,7 @@ function CardEdit<T extends EditableCard>({ card, onChange }: { card: T; onChang
                 variant="ghost"
                 size="icon"
                 onClick={() => removeTag(i)}
-                aria-label="Eliminar tag"
+                aria-label={`Eliminar etiqueta ${i + 1}`}
               >
                 <X className="size-4" />
               </Button>
@@ -408,7 +413,7 @@ function CardEdit<T extends EditableCard>({ card, onChange }: { card: T; onChang
             className="gap-2"
           >
             <Plus className="size-4" />
-            Anadir tag
+            Añadir tag
           </Button>
         </div>
       </div>
@@ -454,10 +459,11 @@ export default function CardEditor<T extends EditableCard>({ card, onChange, ori
             )}
           </div>
 
-          <div className="isolate flex rounded-lg border border-border bg-background p-0.5">
+          <div role="group" aria-label="Modo de la card" className="isolate flex rounded-lg border border-border bg-background p-0.5">
             <button
               type="button"
               onClick={() => setIsEditing(false)}
+              aria-pressed={!isEditing}
               className={cn(
                 "relative flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
                 !isEditing ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground"
@@ -476,6 +482,7 @@ export default function CardEditor<T extends EditableCard>({ card, onChange, ori
             <button
               type="button"
               onClick={() => setIsEditing(true)}
+              aria-pressed={isEditing}
               className={cn(
                 "relative flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
                 isEditing ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground"

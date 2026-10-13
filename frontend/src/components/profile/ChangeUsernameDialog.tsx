@@ -52,13 +52,14 @@ export function ChangeUsernameDialog({ isOpenChangeUserName, setIsOpenChangeUser
           </DialogDescription>
         </DialogHeader>
         {error && (
-          <p className="text-sm text-destructive bg-destructive/10 rounded-lg px-3 py-2">{error}</p>
+          <p role="alert" className="text-sm text-destructive bg-destructive/10 rounded-lg px-3 py-2">{error}</p>
         )}
         <div className="px-4 pb-2">
           <Input
             id="newName"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
+            aria-label="Nombre de usuario"
             placeholder="Nombre de usuario"
             className="mt-1"
           />
