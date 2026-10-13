@@ -171,6 +171,20 @@ def create_app():
     )
 
 
+    # The API only serves JSON and redirects, so a fully closed CSP is safe.
+    # HSTS is production-only: plain-HTTP development must keep working.
+    is_production = app.config.get("FLASK_ENV") == "production"
+
+    @app.after_request
+    def _security_headers(response):
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+        if is_production:
+            response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+        return response
+
     app.register_blueprint(auth)
     app.register_blueprint(oauth_bp)
     app.register_blueprint(stacks)
