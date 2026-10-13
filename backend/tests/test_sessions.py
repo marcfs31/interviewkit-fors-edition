@@ -497,3 +497,43 @@ class TestQuotaOnAIFailures:
         statuses = [_patch_answer(client, auth_headers, session_id, question_id).status_code for _ in range(25)]
 
         assert set(statuses) == {503}
+
+
+class TestNoLlmCallInsideTransaction:
+    """A Groq call can take many seconds: the request must not hold an open DB
+    transaction (and its connection) while it waits."""
+
+    def test_create_session_calls_ai_outside_a_transaction(self, client, auth_headers, monkeypatch):
+        from app import db
+        seen = []
+
+        def spy(stack, level, topic):
+            seen.append(db.session().in_transaction())
+            return dict(FAKE_QUESTIONS)
+
+        monkeypatch.setattr("app.routes.sessions.generate_questions", spy)
+
+        resp = _create_session(client, auth_headers)
+
+        assert resp.status_code == 201
+        assert seen == [False]
+
+    def test_answer_question_calls_ai_outside_a_transaction(self, client, auth_headers, monkeypatch):
+        from app import db
+        data = _create_session(client, auth_headers).get_json()
+        seen = []
+
+        def spy(stack, question, answer, question_type="code"):
+            seen.append((db.session().in_transaction(), stack, question, question_type))
+            return dict(FAKE_FEEDBACK)
+
+        monkeypatch.setattr("app.routes.sessions.generate_feedback", spy)
+        first = data["questions"][0]
+
+        resp = client.patch(
+            f"/sessions/{data['session_id']}/questions/{first['question_id']}",
+            json={"answer": "my answer"}, headers=auth_headers,
+        )
+
+        assert resp.status_code == 200
+        assert seen == [(False, "JavaScript", first["question"], "theory")]

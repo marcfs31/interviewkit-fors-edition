@@ -3,7 +3,7 @@ import os
 # Set test env vars BEFORE any app imports
 os.environ["FLASK_ENV"] = "test"
 os.environ["SECRET_KEY"] = "test-secret-key"
-os.environ["JWT_SECRET_KEY"] = "test-jwt-secret-key"
+os.environ["JWT_SECRET_KEY"] = "test-jwt-secret-key-with-32-bytes-or-more"
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 os.environ["CORS_ORIGINS"] = "http://localhost:3000"
 os.environ["FRONTEND_URL"] = "http://localhost:3000"

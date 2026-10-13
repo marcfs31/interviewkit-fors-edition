@@ -72,7 +72,7 @@ def _init_sentry():
     sentry_sdk.init(
         dsn=dsn,
         integrations=[FlaskIntegration()],
-        environment=os.getenv("FLASK_ENV", "production"),
+        environment=Config.FLASK_ENV,
         send_default_pii=False,
         max_request_body_size="never",
     )
@@ -179,7 +179,8 @@ def create_app():
     app.register_blueprint(user)
     app.register_blueprint(health)
 
-    if Config.FLASK_ENV != "production":
+    # Allowlist: any other value (a typo, a new env) leaves /debug off.
+    if Config.FLASK_ENV in ("development", "test"):
         from .routes.debug import debug
         app.register_blueprint(debug)
 

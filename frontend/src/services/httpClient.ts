@@ -29,6 +29,11 @@ export async function handleResponse<T>(response: Response): Promise<T> {
     throw new Error("Tu sesión ha expirado. Inicia sesión de nuevo.");
   }
 
+  throw new Error(await parseErrorMessage(response));
+}
+
+// Single owner of the error-body format: every service reads failures through here.
+export async function parseErrorMessage(response: Response): Promise<string> {
   let errorMsg;
   try {
     const data = await response.json();
@@ -37,19 +42,76 @@ export async function handleResponse<T>(response: Response): Promise<T> {
     errorMsg = null;
   }
 
-  throw new Error(errorMsg || `Error ${response.status}: ${response.statusText}`);
+  return errorMsg || `Error ${response.status}: ${response.statusText}`;
 }
 
-export async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
-  const { headers: customHeaders, ...rest } = options;
-  return fetch(`${API_URL}${url}`, {
-    ...rest,
-    credentials: "include",
-    headers: {
-      ...headers(),
-      ...customHeaders,
-    },
-  });
+export const DEFAULT_TIMEOUT_MS = 15_000;
+// Backend worst case for an AI call is about 40 s.
+export const AI_TIMEOUT_MS = 60_000;
+
+export class ApiTimeoutError extends Error {
+  constructor() {
+    super("La solicitud tardó demasiado. Inténtalo de nuevo.");
+    this.name = "ApiTimeoutError";
+  }
+}
+
+export class ApiNetworkError extends Error {
+  constructor() {
+    super("No se pudo conectar con el servidor.");
+    this.name = "ApiNetworkError";
+  }
+}
+
+function timeoutSignal(timeoutMs: number): AbortSignal {
+  if (typeof AbortSignal.timeout === "function") return AbortSignal.timeout(timeoutMs);
+
+  // AbortSignal.timeout is missing before Chrome 103 / Firefox 100 / Safari 16, which we still build for.
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(new DOMException("The operation timed out.", "TimeoutError")), timeoutMs);
+  return controller.signal;
+}
+
+function withTimeout(timeoutMs: number, callerSignal?: AbortSignal | null): AbortSignal {
+  const timeout = timeoutSignal(timeoutMs);
+  if (!callerSignal) return timeout;
+  if (typeof AbortSignal.any === "function") return AbortSignal.any([callerSignal, timeout]);
+
+  // Browsers without AbortSignal.any: forward whichever signal fires first.
+  const controller = new AbortController();
+  for (const signal of [callerSignal, timeout]) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      break;
+    }
+    signal.addEventListener("abort", () => controller.abort(signal.reason), { once: true });
+  }
+  return controller.signal;
+}
+
+export async function apiFetch(
+  url: string,
+  options: RequestInit & { timeoutMs?: number } = {}
+): Promise<Response> {
+  const { headers: customHeaders, timeoutMs = DEFAULT_TIMEOUT_MS, signal, ...rest } = options;
+  // Built outside the try so an unexpected failure here is not reported as a network error.
+  const combinedSignal = withTimeout(timeoutMs, signal);
+  try {
+    return await fetch(`${API_URL}${url}`, {
+      ...rest,
+      credentials: "include",
+      signal: combinedSignal,
+      headers: {
+        ...headers(),
+        ...customHeaders,
+      },
+    });
+  } catch (error) {
+    // Matched by name: a DOMException can come from another realm and fail instanceof Error.
+    if ((error as { name?: unknown } | null)?.name === "TimeoutError") throw new ApiTimeoutError();
+    if (error instanceof TypeError) throw new ApiNetworkError();
+    throw error;
+  }
 }
 
 export { API_URL };

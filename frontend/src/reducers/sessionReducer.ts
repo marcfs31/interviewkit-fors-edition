@@ -13,7 +13,10 @@ type Action =
 | { type: "CARD_DISCARDED" ;}
 | { type: "SESSION_ENDED";}
 | { type: "SESSION_COMPLETED"; payload: {xp_earned?: number; total_xp?: number; level?: number; xp_to_next_level?: number; progress_in_level?: number; bonus_applied?: boolean; xp_per_level?: number}}
-| { type: "SET_ERROR"; payload: string | null}
+| { type: "SUBMIT_FAILED"; payload: string }
+| { type: "CARD_SAVE_FAILED"; payload: string }
+| { type: "COMPLETE_FAILED"; payload: string }
+| { type: "COMPLETE_RETRYING" }
 | { type: "RESET_SESSION";}   
 
 
@@ -61,6 +64,7 @@ interface State {
   sessionBonusApplied: boolean;       
   sessionCompleteLoaded: boolean;
   error: null | string; 
+  completeError: null | string;
 }
 
 export const initialState: State = {
@@ -85,6 +89,7 @@ export const initialState: State = {
   sessionBonusApplied: false,
   sessionCompleteLoaded: false, 
   error: null,
+  completeError: null,
 };
 
 // Reducer que controla todo el flujo de la sesion de entrevista
@@ -122,6 +127,7 @@ export function sessionReducer(state: State, action: Action): State {
         sessionBonusApplied: false,
         sessionCompleteLoaded: false,
         error: null,
+        completeError: null,
       };
     }
 
@@ -172,6 +178,7 @@ export function sessionReducer(state: State, action: Action): State {
       return {
         ...state,
         card: { ...state.card, ...action.payload },
+        error: null,
       };
 
     // Avanza a la siguiente pregunta o termina la sesion si no hay mas
@@ -195,7 +202,7 @@ export function sessionReducer(state: State, action: Action): State {
     case "CARD_SAVED": {
       const nextIndex = state.currentQuestionIndex + 1;
       if (nextIndex >= state.questions.length) {
-        return { ...state, card: null, currentPhase: "complete" };
+        return { ...state, card: null, currentPhase: "complete", error: null };
       }
       return {
         ...state,
@@ -212,7 +219,7 @@ export function sessionReducer(state: State, action: Action): State {
     case "CARD_DISCARDED": {
       const nextIndex = state.currentQuestionIndex + 1;
       if (nextIndex >= state.questions.length) {
-        return { ...state, card: null, currentPhase: "complete" };
+        return { ...state, card: null, currentPhase: "complete", error: null };
       }
       return {
         ...state,
@@ -245,12 +252,24 @@ export function sessionReducer(state: State, action: Action): State {
         sessionXpPerLevel: xp_per_level ?? 0,
         sessionBonusApplied: !!bonus_applied,
         sessionCompleteLoaded: true,
+        completeError: null,
       };
     }
 
-    // Guarda un mensaje de error para mostrar al usuario
-    case "SET_ERROR":
+    // Falla el envio de la respuesta: volvemos a la pregunta con la respuesta intacta
+    case "SUBMIT_FAILED":
       return { ...state, error: action.payload, currentPhase: "answering" };
+
+    // Falla el guardado de la card: nos quedamos en el feedback para no perder las ediciones
+    case "CARD_SAVE_FAILED":
+      return { ...state, error: action.payload };
+
+    // /complete ha fallado: no inventamos XP, mostramos el error y permitimos reintentar
+    case "COMPLETE_FAILED":
+      return { ...state, completeError: action.payload, sessionCompleteLoaded: false };
+
+    case "COMPLETE_RETRYING":
+      return { ...state, completeError: null, sessionCompleteLoaded: false };
 
     // Reinicia el estado para empezar una nueva sesion
     case "RESET_SESSION":

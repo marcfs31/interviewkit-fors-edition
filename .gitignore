@@ -26,3 +26,6 @@ Thumbs.db
 
 # Auditorias/notas de trabajo locales, no se versionan
 AUDIT.md
+
+# Indice local de codigo (graft), no se versiona
+graft/

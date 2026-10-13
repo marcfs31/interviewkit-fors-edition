@@ -57,3 +57,64 @@ describe('sessionReducer with 5 questions (2 theory + 3 code)', () => {
     expect(state.questions.map((q) => q.feedback)).toEqual([0, 1, 2, 3, 4].map((i) => `feedback ${i}`));
   });
 });
+
+describe('sessionReducer error paths', () => {
+  const toFeedback = (): ReturnType<typeof run> =>
+    run([
+      start,
+      { type: 'ANSWER_CHANGED', payload: 'my answer' },
+      { type: 'ANSWER_SUBMITTED' },
+      { type: 'FEEDBACK_RECEIVED', payload: { feedback: 'fb', result: 'CORRECT', card: CARD } },
+    ]);
+
+  it('SUBMIT_FAILED returns to answering with the answer kept and the error set', () => {
+    const state = run([
+      start,
+      { type: 'ANSWER_CHANGED', payload: 'my answer' },
+      { type: 'ANSWER_SUBMITTED' },
+      { type: 'SUBMIT_FAILED', payload: 'boom' },
+    ]);
+    expect(state.currentPhase).toBe('answering');
+    expect(state.currentAnswer).toBe('my answer');
+    expect(state.error).toBe('boom');
+  });
+
+  it('CARD_SAVE_FAILED keeps waiting_action with the edited card and feedback intact', () => {
+    let state = toFeedback();
+    state = sessionReducer(state, { type: 'UPDATE_CARD', payload: { concept: 'edited' } });
+    state = sessionReducer(state, { type: 'CARD_SAVE_FAILED', payload: 'no se pudo guardar' });
+    expect(state.currentPhase).toBe('waiting_action');
+    expect(state.card?.concept).toBe('edited');
+    expect(state.feedback).toBe('fb');
+    expect(state.result).toBe('CORRECT');
+    expect(state.currentQuestionIndex).toBe(0);
+    expect(state.error).toBe('no se pudo guardar');
+  });
+
+  it('clears a card-save error once the card is saved or discarded', () => {
+    const failed = sessionReducer(toFeedback(), { type: 'CARD_SAVE_FAILED', payload: 'x' });
+    expect(sessionReducer(failed, { type: 'CARD_SAVED' }).error).toBeNull();
+    expect(sessionReducer(failed, { type: 'CARD_DISCARDED' }).error).toBeNull();
+  });
+
+  it('clears a card-save error when the user edits the card again', () => {
+    const failed = sessionReducer(toFeedback(), { type: 'CARD_SAVE_FAILED', payload: 'x' });
+    expect(sessionReducer(failed, { type: 'UPDATE_CARD', payload: { concept: 'y' } }).error).toBeNull();
+  });
+
+  it('COMPLETE_FAILED stays in complete without inventing XP and COMPLETE_RETRYING clears it', () => {
+    const complete = run([start, ...Array(5).fill({ type: 'CARD_DISCARDED' })]);
+    expect(complete.currentPhase).toBe('complete');
+    const failed = sessionReducer(complete, { type: 'COMPLETE_FAILED', payload: 'down' });
+    expect(failed.currentPhase).toBe('complete');
+    expect(failed.completeError).toBe('down');
+    expect(failed.sessionCompleteLoaded).toBe(false);
+    expect(failed.sessionXpEarned).toBe(0);
+    const retrying = sessionReducer(failed, { type: 'COMPLETE_RETRYING' });
+    expect(retrying.completeError).toBeNull();
+    expect(retrying.sessionCompleteLoaded).toBe(false);
+    const done = sessionReducer(retrying, { type: 'SESSION_COMPLETED', payload: { xp_earned: 120 } });
+    expect(done.sessionCompleteLoaded).toBe(true);
+    expect(done.completeError).toBeNull();
+  });
+});

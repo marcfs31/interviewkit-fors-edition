@@ -706,3 +706,59 @@ class TestCallGroq:
     def test_success_without_usage_does_not_break(self, monkeypatch):
         _stub_create(monkeypatch, lambda **kwargs: _completion("{}"))
         ai_service._call_groq("feedback", messages=[])  # _completion has no .usage
+
+
+class TestNoSdkRetries:
+    """The module client goes over a real (mocked) HTTP transport, so the SDK's
+    own retry loop is exercised. Provider errors must cost exactly one request."""
+
+    @pytest.fixture
+    def http_attempts(self, monkeypatch):
+        attempts = []
+        # The SDK sleeps between retries; keep a regression from hanging the suite.
+        monkeypatch.setattr("time.sleep", lambda seconds: None)
+
+        def install(handler):
+            def counting(request):
+                attempts.append(request)
+                return handler(request)
+
+            monkeypatch.setattr(
+                ai_service.client, "_client", httpx.Client(transport=httpx.MockTransport(counting))
+            )
+            return attempts
+
+        return install
+
+    @pytest.mark.parametrize("status", [429, 500, 503])
+    def test_provider_error_is_not_retried(self, http_attempts, status):
+        attempts = http_attempts(lambda request: httpx.Response(status, json={"error": {"message": "x"}}))
+
+        with pytest.raises(AIUnavailableError):
+            ai_service._call_groq("questions", messages=[{"role": "user", "content": "hi"}])
+
+        assert len(attempts) == 1
+
+    def test_connection_error_is_not_retried(self, http_attempts):
+        def refuse(request):
+            raise httpx.ConnectError("refused", request=request)
+
+        attempts = http_attempts(refuse)
+
+        with pytest.raises(AIUnavailableError):
+            ai_service._call_groq("questions", messages=[{"role": "user", "content": "hi"}])
+
+        assert len(attempts) == 1
+
+    def test_successful_call_is_a_single_request(self, http_attempts):
+        body = {
+            "id": "x", "object": "chat.completion", "created": 0, "model": ai_service.MODEL,
+            "choices": [{"index": 0, "finish_reason": "stop",
+                         "message": {"role": "assistant", "content": "{}"}}],
+        }
+        attempts = http_attempts(lambda request: httpx.Response(200, json=body))
+
+        completion = ai_service._call_groq("questions", messages=[{"role": "user", "content": "hi"}])
+
+        assert completion.choices[0].message.content == "{}"
+        assert len(attempts) == 1

@@ -108,7 +108,7 @@ function Navbar() {
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <ThemeToggle />
 
-          {user && (
+          {user && stats && (
             <div
               className="hidden sm:flex items-center gap-2 rounded-lg border border-border/50 bg-background px-3 py-1.5 text-sm"
               title={`${stats.total_xp} XP · ${stats.xp_to_next_level} XP para Nv ${stats.level + 1}`}
@@ -199,7 +199,9 @@ function Navbar() {
               </Avatar>
               <div className="flex flex-col">
                 <span className="text-sm font-medium">{user || "Usuario"}</span>
-                <span className="text-xs text-muted-foreground">Nv {stats.level} · {stats.total_xp} XP</span>
+                {stats && (
+                  <span className="text-xs text-muted-foreground">Nv {stats.level} · {stats.total_xp} XP</span>
+                )}
               </div>
             </div>
             {navLinks.map(({ path, label, icon: Icon }) => (
