@@ -73,11 +73,16 @@ def create_session():
 
     new_session = Session(user_id=user_id, stack=stack, level=level, topic=topic)
     db.session.add(new_session)
+    # Flush to get the id, then read it before the commit expires the instance:
+    # touching an ORM attribute afterwards would open a transaction that stays
+    # open during the Groq call.
+    db.session.flush()
+    new_session_id = new_session.session_id
     db.session.commit()
 
     # Two question blocks: theory first, then code
     try:
-        with ai_call_context(user_id=int(user_id), session_id=new_session.session_id):
+        with ai_call_context(user_id=int(user_id), session_id=new_session_id):
             questions = generate_questions(stack, level, topic)
     except AIUnavailableError as error:
         db.session.delete(new_session)
@@ -140,6 +145,11 @@ def answer_question(session_id, question_id):
         return jsonify({"error": f"La respuesta no puede superar los {MAX_ANSWER_LENGTH} caracteres"}), 400
 
     user_question.answer = answer
+    # Copied before the commit: reading them afterwards would open a
+    # transaction that stays open during the Groq call.
+    stack = user_sesion.stack
+    question_text = user_question.question
+    question_type = user_question.question_type
     db.session.commit()
 
     # The answer is already saved: if the AI fails, `result` stays untouched
@@ -147,7 +157,7 @@ def answer_question(session_id, question_id):
     try:
         with ai_call_context(user_id=int(user_id), session_id=session_id):
             result = generate_feedback(
-                user_sesion.stack, user_question.question, answer, user_question.question_type
+                stack, question_text, answer, question_type
             )
     except AIUnavailableError as error:
         return _ai_error_response(error)
