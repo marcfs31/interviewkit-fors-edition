@@ -1,4 +1,4 @@
-import { API_URL, handleResponse } from "./httpClient";
+import { apiFetch, handleResponse } from "./httpClient";
 
 export interface StackResponse {
   rol: Record<string, string[]>;
@@ -7,6 +7,6 @@ export interface StackResponse {
 }
 
 export async function getStacks(): Promise<StackResponse> {
-  const response = await fetch(`${API_URL}/stacks/`);
+  const response = await apiFetch("/stacks/");
   return handleResponse<StackResponse>(response);
 }
