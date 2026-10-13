@@ -8,6 +8,67 @@ from .. import db
 
 cards = Blueprint('cards', __name__, url_prefix='/cards')
 
+# Over a cap is a 400, never a silent truncation. concept and code_language
+# are their column sizes; the rest are payload caps (the columns are Text).
+TEXT_LIMITS = {
+    "concept": 120,
+    "definition": 2000,
+    "explanation": 2000,
+    "use_case": 2000,
+    "avoid_when": 2000,
+    "code": 10000,
+    "code_language": 50,
+}
+MAX_TAGS = 10
+MAX_TAG_LENGTH = 40
+
+
+def _clean_tags(raw):
+    """The stripped tags, or None when `raw` isn't a valid list of them."""
+    if not isinstance(raw, list) or len(raw) > MAX_TAGS:
+        return None
+    tags = []
+    for tag in raw:
+        if not isinstance(tag, str):
+            return None
+        tag = tag.strip()
+        if not tag or len(tag) > MAX_TAG_LENGTH:
+            return None
+        tags.append(tag)
+    return tags
+
+
+def _validate_card_fields(data):
+    """Returns (clean, error). `clean` holds the stripped text of every text
+    field present in `data` ("" when null) and the normalized tags (None
+    when null); `error` is the Spanish 400 message or None."""
+    clean = {}
+    for field in (*TEXT_LIMITS, "mnemonic"):
+        if field not in data:
+            continue
+        raw = data[field]
+        if raw is None:
+            clean[field] = ""
+            continue
+        if not isinstance(raw, str):
+            return None, f"El campo {field} debe ser texto"
+        value = raw.strip()
+        limit = TEXT_LIMITS.get(field)
+        if limit and len(value) > limit:
+            return None, f"El campo {field} no puede superar los {limit} caracteres"
+        clean[field] = value
+
+    if "tags" in data:
+        tags = None if data["tags"] is None else _clean_tags(data["tags"])
+        if tags is None and data["tags"] is not None:
+            return None, (
+                f"El campo tags debe ser una lista de hasta {MAX_TAGS} textos "
+                f"no vacios de maximo {MAX_TAG_LENGTH} caracteres"
+            )
+        clean["tags"] = tags
+    return clean, None
+
+
 @cards.route('/', methods=['GET'])
 @jwt_required()
 def get_cards():
@@ -31,42 +92,36 @@ def update_card(card_id):
         return jsonify({"msg": "La card no existe"}), 404
 
     data = request.get_json() or {}
+    clean, error = _validate_card_fields(data)
+    if error:
+        return jsonify({"msg": error}), 400
 
-    concept = (data.get("concept") or "").strip()
-    if concept:
-        card.concept = concept[:120]
+    if clean.get("concept"):
+        card.concept = clean["concept"]
 
-    if "definition" in data:
-        definition = (data.get("definition") or "").strip()
-        card.definition = definition or None
+    if "definition" in clean:
+        card.definition = clean["definition"] or None
 
-    explanation = (data.get("explanation") or "").strip()
-    if explanation:
-        card.explanation = explanation
+    if clean.get("explanation"):
+        card.explanation = clean["explanation"]
 
-    use_case = (data.get("use_case") or "").strip()
-    if use_case:
-        card.use_case = use_case
+    if clean.get("use_case"):
+        card.use_case = clean["use_case"]
 
-    if "avoid_when" in data:
-        avoid_when = (data.get("avoid_when") or "").strip()
-        card.avoid_when = avoid_when or None
+    if "avoid_when" in clean:
+        card.avoid_when = clean["avoid_when"] or None
 
-    if "mnemonic" in data:
-        mnemonic = (data.get("mnemonic") or "").strip()
-        card.mnemonic = mnemonic[:200] if mnemonic else None
+    if "mnemonic" in clean:
+        card.mnemonic = clean["mnemonic"][:200] or None
 
-    if "tags" in data:
-        card.tags = data["tags"] if isinstance(data["tags"], list) else None
+    if "tags" in clean:
+        card.tags = clean["tags"]
 
-    if "code" in data:
-        code = fix_literal_escapes((data.get("code") or "").strip())
-        card.code = code or None
+    if "code" in clean:
+        card.code = fix_literal_escapes(clean["code"]) or None
 
-    if "code_language" in data:
-        code_language = (data.get("code_language") or "").strip()
-        if code_language:
-            card.code_language = code_language
+    if clean.get("code_language"):
+        card.code_language = clean["code_language"]
 
     db.session.commit()
 
@@ -118,21 +173,17 @@ def create_card():
     if not question:
         return jsonify({"msg": "La pregunta no existe"}), 404
 
-    concept = (data.get("concept") or "").strip()
-    explanation = (data.get("explanation") or "").strip()
-    use_case = (data.get("use_case") or "").strip()
+    clean, error = _validate_card_fields(data)
+    if error:
+        return jsonify({"msg": error}), 400
+
+    concept = clean.get("concept", "")
+    explanation = clean.get("explanation", "")
+    use_case = clean.get("use_case", "")
     if not concept or not explanation or not use_case:
         return jsonify({
             "msg": "Los campos concept, explanation y use_case son obligatorios"
         }), 400
-
-    # Truncate to the model's limits (defense in depth)
-    if len(concept) > 120:
-        concept = concept[:120]
-    mnemonic = (data.get("mnemonic") or "").strip()[:200] or None
-    tags = data.get("tags")
-    if not isinstance(tags, list):
-        tags = None
 
     # Difficulty is inherited from the session's level
     difficulty = LEVEL_TO_DIFFICULTY.get(session.level)
@@ -142,14 +193,14 @@ def create_card():
         session_id=data.get("session_id"),
         user_id=user_id,
         concept=concept,
-        definition=(data.get("definition") or "").strip() or None,
+        definition=clean.get("definition") or None,
         explanation=explanation,
         use_case=use_case,
-        avoid_when=(data.get("avoid_when") or "").strip() or None,
-        mnemonic=mnemonic,
-        tags=tags,
-        code=fix_literal_escapes((data.get("code") or "").strip()) or None,
-        code_language=(data.get("code_language") or "javascript").strip() or "javascript",
+        avoid_when=clean.get("avoid_when") or None,
+        mnemonic=clean.get("mnemonic", "")[:200] or None,
+        tags=clean.get("tags"),
+        code=fix_literal_escapes(clean.get("code", "")) or None,
+        code_language=clean.get("code_language") or "javascript",
         difficulty=difficulty,
     )
     db.session.add(new_card)

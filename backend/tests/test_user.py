@@ -304,6 +304,21 @@ class TestGetMyStats:
         assert data["cards_summary"]["total"] == 6
         assert data["cards_summary"]["top_tags"] == ["A", "B", "C", "D", "E"]
 
+    def test_non_string_tags_already_stored_are_ignored_not_a_500(self, client, db, app, auth_headers):
+        """Rows saved before tags were validated can hold nested lists, dicts
+        or numbers (unhashable as a counter key): they are skipped and the
+        string tags are still counted."""
+        user_id = auth_headers["user_id"]
+        with app.app_context():
+            sess = _seed_session(db, user_id, stack="Python")
+            _seed_card(db, user_id, sess.session_id, tags=[["nested"], {"k": "v"}, 7, None, "ok", "ok"])
+            _seed_card(db, user_id, sess.session_id, tags=["ok", "other"])
+            db.session.commit()
+
+        resp = client.get("/me/stats", headers=_headers_without_user(auth_headers))
+        assert resp.status_code == 200
+        assert resp.get_json()["cards_summary"]["top_tags"] == ["ok", "other"]
+
     def test_returns_404_for_a_user_deleted_after_token_issue(self, client, db, app):
         """A cryptographically valid JWT is not enough: if the user row is
         gone (deleted after the token was issued), both stats must 404."""
