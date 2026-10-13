@@ -7,6 +7,7 @@ below) -- no test in this file, or in the whole suite, should ever reach
 the real Groq API. Rate limiting is real (flask-limiter, in-memory storage)
 and reset before/after every test so tests don't bleed into each other.
 """
+
 import pytest
 from app.services.ai_service import AIUnavailableError
 
@@ -20,9 +21,15 @@ FAKE_FEEDBACK = {
     "result": "CORRECT",
     "feedback": "Well done.",
     "card": {
-        "concept": "Closures", "definition": "...", "explanation": "...",
-        "use_case": "...", "avoid_when": "", "mnemonic": "", "code": "",
-        "code_language": "javascript", "tags": [],
+        "concept": "Closures",
+        "definition": "...",
+        "explanation": "...",
+        "use_case": "...",
+        "avoid_when": "",
+        "mnemonic": "",
+        "code": "",
+        "code_language": "javascript",
+        "tags": [],
     },
 }
 
@@ -32,7 +39,10 @@ VALID_PAYLOAD = {"stack": "JavaScript", "level": "Básico", "topic": "General / 
 @pytest.fixture(autouse=True)
 def _mock_ai(monkeypatch):
     """No test should ever call the real Groq API."""
-    monkeypatch.setattr("app.routes.sessions.generate_questions", lambda stack, level, topic: dict(FAKE_QUESTIONS))
+    monkeypatch.setattr(
+        "app.routes.sessions.generate_questions",
+        lambda stack, level, topic: dict(FAKE_QUESTIONS),
+    )
     monkeypatch.setattr(
         "app.routes.sessions.generate_feedback",
         lambda stack, question, answer, question_type="code": dict(FAKE_FEEDBACK),
@@ -44,55 +54,89 @@ def _create_session(client, headers, payload=None):
 
 
 class TestCreateSession:
-    def test_create_session_success_returns_theory_then_code_questions(self, client, auth_headers):
+    def test_create_session_success_returns_theory_then_code_questions(
+        self, client, auth_headers
+    ):
         resp = _create_session(client, auth_headers)
         assert resp.status_code == 201
         data = resp.get_json()
         assert len(data["questions"]) == 5
-        assert [q["type"] for q in data["questions"]] == ["theory", "theory", "code", "code", "code"]
+        assert [q["type"] for q in data["questions"]] == [
+            "theory",
+            "theory",
+            "code",
+            "code",
+            "code",
+        ]
 
-    def test_create_session_invalid_stack_returns_400_before_calling_ai(self, client, auth_headers, monkeypatch):
+    def test_create_session_invalid_stack_returns_400_before_calling_ai(
+        self, client, auth_headers, monkeypatch
+    ):
         """An invalid stack must be rejected before the AI service is ever
         called -- verified here by making the mock raise if it's reached."""
+
         def fail_if_called(*args, **kwargs):
-            raise AssertionError("generate_questions should not be called for an invalid stack")
+            raise AssertionError(
+                "generate_questions should not be called for an invalid stack"
+            )
+
         monkeypatch.setattr("app.routes.sessions.generate_questions", fail_if_called)
 
-        resp = client.post("/sessions/", json={"stack": "not-a-stack", "level": "Básico"}, headers=auth_headers)
+        resp = client.post(
+            "/sessions/",
+            json={"stack": "not-a-stack", "level": "Básico"},
+            headers=auth_headers,
+        )
         assert resp.status_code == 400
 
     def test_create_session_invalid_level_returns_400(self, client, auth_headers):
         resp = client.post(
-            "/sessions/", json={"stack": "JavaScript", "level": "not-a-level"}, headers=auth_headers
+            "/sessions/",
+            json={"stack": "JavaScript", "level": "not-a-level"},
+            headers=auth_headers,
         )
         assert resp.status_code == 400
 
-    def test_create_session_without_topic_defaults_to_general(self, client, auth_headers):
+    def test_create_session_without_topic_defaults_to_general(
+        self, client, auth_headers
+    ):
         """Backwards compatibility: a client that doesn't send 'topic' (an
         older frontend build, predating this feature) must not break --
         it falls back to the stack's catch-all topic."""
         resp = client.post(
-            "/sessions/", json={"stack": "JavaScript", "level": "Básico"}, headers=auth_headers
-        )
-        assert resp.status_code == 201
-        assert resp.get_json()["topic"] == "General / Mixto"
-
-    def test_create_session_with_topic_invalid_for_that_stack_falls_back_to_general(self, client, auth_headers):
-        """A topic that exists for a different stack (but not this one)
-        must also fall back, not be silently accepted."""
-        resp = client.post(
             "/sessions/",
-            json={"stack": "JavaScript", "level": "Básico", "topic": "Joins y subqueries"},  # an SQL topic
+            json={"stack": "JavaScript", "level": "Básico"},
             headers=auth_headers,
         )
         assert resp.status_code == 201
         assert resp.get_json()["topic"] == "General / Mixto"
 
-    def test_create_session_accepts_the_accented_topic_name(self, client, auth_headers, monkeypatch):
+    def test_create_session_with_topic_invalid_for_that_stack_falls_back_to_general(
+        self, client, auth_headers
+    ):
+        """A topic that exists for a different stack (but not this one)
+        must also fall back, not be silently accepted."""
+        resp = client.post(
+            "/sessions/",
+            json={
+                "stack": "JavaScript",
+                "level": "Básico",
+                "topic": "Joins y subqueries",
+            },  # an SQL topic
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201
+        assert resp.get_json()["topic"] == "General / Mixto"
+
+    def test_create_session_accepts_the_accented_topic_name(
+        self, client, auth_headers, monkeypatch
+    ):
         seen = {}
         monkeypatch.setattr(
             "app.routes.sessions.generate_questions",
-            lambda stack, level, topic: seen.update(topic=topic) or dict(FAKE_QUESTIONS),
+            lambda stack, level, topic: (
+                seen.update(topic=topic) or dict(FAKE_QUESTIONS)
+            ),
         )
         resp = client.post(
             "/sessions/",
@@ -103,21 +147,32 @@ class TestCreateSession:
         assert resp.get_json()["topic"] == "Gestión de estado"
         assert seen["topic"] == "Gestión de estado"
 
-    @pytest.mark.parametrize("stack, old_name, new_name", [
-        ("React", "Gestion de estado", "Gestión de estado"),
-        ("SQL", "Indices y performance", "Índices y performance"),
-        ("SQL", "Normalizacion", "Normalización"),
-        ("Java", "Concurrencia basica (threads, synchronized)", "Concurrencia básica (threads, synchronized)"),
-        ("Java", "Spring basico", "Spring básico"),
-    ])
-    def test_create_session_maps_the_old_unaccented_topic_names(self, client, auth_headers, monkeypatch, stack, old_name, new_name):
+    @pytest.mark.parametrize(
+        "stack, old_name, new_name",
+        [
+            ("React", "Gestion de estado", "Gestión de estado"),
+            ("SQL", "Indices y performance", "Índices y performance"),
+            ("SQL", "Normalizacion", "Normalización"),
+            (
+                "Java",
+                "Concurrencia basica (threads, synchronized)",
+                "Concurrencia básica (threads, synchronized)",
+            ),
+            ("Java", "Spring basico", "Spring básico"),
+        ],
+    )
+    def test_create_session_maps_the_old_unaccented_topic_names(
+        self, client, auth_headers, monkeypatch, stack, old_name, new_name
+    ):
         """Topic names were corrected to carry their accents. A browser tab
         opened before the change still sends the old name; it must map to the
         right topic instead of silently falling back to 'General / Mixto'."""
         seen = {}
         monkeypatch.setattr(
             "app.routes.sessions.generate_questions",
-            lambda stack, level, topic: seen.update(topic=topic) or dict(FAKE_QUESTIONS),
+            lambda stack, level, topic: (
+                seen.update(topic=topic) or dict(FAKE_QUESTIONS)
+            ),
         )
         resp = client.post(
             "/sessions/",
@@ -134,7 +189,9 @@ class TestCreateSession:
 
 
 class TestAnswerQuestion:
-    def test_answer_question_success_saves_answer_and_returns_ai_feedback(self, client, auth_headers):
+    def test_answer_question_success_saves_answer_and_returns_ai_feedback(
+        self, client, auth_headers
+    ):
         created = _create_session(client, auth_headers)
         session_id = created.get_json()["session_id"]
         question_id = created.get_json()["questions"][0]["question_id"]
@@ -150,13 +207,19 @@ class TestAnswerQuestion:
         assert data["card"]["concept"] == "Closures"
 
         from app.models.question import Question
+
         saved_question = Question.query.filter_by(question_id=question_id).first()
         assert saved_question.answer == "my answer"
         assert saved_question.result == "CORRECT"
 
-    def test_answer_question_over_max_length_returns_400_without_calling_ai(self, client, auth_headers, monkeypatch):
+    def test_answer_question_over_max_length_returns_400_without_calling_ai(
+        self, client, auth_headers, monkeypatch
+    ):
         def fail_if_called(*args, **kwargs):
-            raise AssertionError("generate_feedback should not be called for an oversized answer")
+            raise AssertionError(
+                "generate_feedback should not be called for an oversized answer"
+            )
+
         monkeypatch.setattr("app.routes.sessions.generate_feedback", fail_if_called)
         created = _create_session(client, auth_headers)
         session_id = created.get_json()["session_id"]
@@ -170,62 +233,98 @@ class TestAnswerQuestion:
 
         assert resp.status_code == 400
 
-    @pytest.mark.parametrize("body", [
-        {"answer": None}, {}, {"answer": ""}, {"answer": "   "}, {"answer": "\n\t "},
-        {"answer": 123}, {"answer": True}, {"answer": ["texto"]}, {"answer": {"text": "texto"}},
-        ["texto"],
-    ], ids=repr)
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"answer": None},
+            {},
+            {"answer": ""},
+            {"answer": "   "},
+            {"answer": "\n\t "},
+            {"answer": 123},
+            {"answer": True},
+            {"answer": ["texto"]},
+            {"answer": {"text": "texto"}},
+            ["texto"],
+        ],
+        ids=repr,
+    )
     def test_blank_or_non_string_answer_returns_400_without_touching_db_or_ai(
         self, client, auth_headers, monkeypatch, body
     ):
         created = _create_session(client, auth_headers)
         session_id = created.get_json()["session_id"]
         question_id = created.get_json()["questions"][0]["question_id"]
-        assert _patch_answer(client, auth_headers, session_id, question_id, answer="primera").status_code == 200
+        assert (
+            _patch_answer(
+                client, auth_headers, session_id, question_id, answer="primera"
+            ).status_code
+            == 200
+        )
 
         def fail_if_called(*args, **kwargs):
-            raise AssertionError("generate_feedback should not be called for an unusable answer")
+            raise AssertionError(
+                "generate_feedback should not be called for an unusable answer"
+            )
+
         monkeypatch.setattr("app.routes.sessions.generate_feedback", fail_if_called)
 
         resp = client.patch(
-            f"/sessions/{session_id}/questions/{question_id}", json=body, headers=auth_headers
+            f"/sessions/{session_id}/questions/{question_id}",
+            json=body,
+            headers=auth_headers,
         )
 
         assert resp.status_code == 400
         assert "error" in resp.get_json()
         from app.models.question import Question
+
         saved = Question.query.filter_by(question_id=question_id).first()
         assert saved.answer == "primera"
         assert saved.result == "CORRECT"
         assert saved.feedback == "Well done."
 
-    def test_answer_with_surrounding_whitespace_is_accepted_as_is(self, client, auth_headers):
+    def test_answer_with_surrounding_whitespace_is_accepted_as_is(
+        self, client, auth_headers
+    ):
         created = _create_session(client, auth_headers)
         session_id = created.get_json()["session_id"]
         question_id = created.get_json()["questions"][0]["question_id"]
 
-        resp = _patch_answer(client, auth_headers, session_id, question_id, answer="  respuesta \n")
+        resp = _patch_answer(
+            client, auth_headers, session_id, question_id, answer="  respuesta \n"
+        )
 
         assert resp.status_code == 200
         from app.models.question import Question
-        assert Question.query.filter_by(question_id=question_id).first().answer == "  respuesta \n"
+
+        assert (
+            Question.query.filter_by(question_id=question_id).first().answer
+            == "  respuesta \n"
+        )
 
     def test_answer_at_the_max_length_is_accepted(self, client, auth_headers):
         created = _create_session(client, auth_headers)
         session_id = created.get_json()["session_id"]
         question_id = created.get_json()["questions"][0]["question_id"]
 
-        resp = _patch_answer(client, auth_headers, session_id, question_id, answer="a" * 4000)
+        resp = _patch_answer(
+            client, auth_headers, session_id, question_id, answer="a" * 4000
+        )
 
         assert resp.status_code == 200
 
-    def test_answer_question_nonexistent_session_returns_404(self, client, auth_headers):
+    def test_answer_question_nonexistent_session_returns_404(
+        self, client, auth_headers
+    ):
         resp = client.patch(
             "/sessions/99999/questions/1", json={"answer": "x"}, headers=auth_headers
         )
         assert resp.status_code == 404
 
-    def test_answer_question_session_of_another_user_returns_404(self, client, auth_headers, second_user_headers):
+    def test_answer_question_session_of_another_user_returns_404(
+        self, client, auth_headers, second_user_headers
+    ):
         """Security: user B cannot submit an answer into user A's session."""
         created = _create_session(client, auth_headers)
         session_id = created.get_json()["session_id"]
@@ -238,12 +337,16 @@ class TestAnswerQuestion:
         )
         assert resp.status_code == 404
 
-    def test_answer_question_nonexistent_question_returns_404(self, client, auth_headers):
+    def test_answer_question_nonexistent_question_returns_404(
+        self, client, auth_headers
+    ):
         created = _create_session(client, auth_headers)
         session_id = created.get_json()["session_id"]
 
         resp = client.patch(
-            f"/sessions/{session_id}/questions/999999", json={"answer": "x"}, headers=auth_headers
+            f"/sessions/{session_id}/questions/999999",
+            json={"answer": "x"},
+            headers=auth_headers,
         )
         assert resp.status_code == 404
 
@@ -252,7 +355,9 @@ class TestAnswerQuestion:
         session_id = created.get_json()["session_id"]
         question_id = created.get_json()["questions"][0]["question_id"]
 
-        resp = client.patch(f"/sessions/{session_id}/questions/{question_id}", json={"answer": "x"})
+        resp = client.patch(
+            f"/sessions/{session_id}/questions/{question_id}", json={"answer": "x"}
+        )
         assert resp.status_code == 401
 
 
@@ -263,11 +368,15 @@ class TestCompleteSession:
         question_ids = [q["question_id"] for q in created.get_json()["questions"]]
         for qid in question_ids:
             client.patch(
-                f"/sessions/{session_id}/questions/{qid}", json={"answer": "x"}, headers=auth_headers
+                f"/sessions/{session_id}/questions/{qid}",
+                json={"answer": "x"},
+                headers=auth_headers,
             )
         return session_id, question_ids
 
-    def test_complete_session_awards_xp_and_completion_bonus(self, client, auth_headers):
+    def test_complete_session_awards_xp_and_completion_bonus(
+        self, client, auth_headers
+    ):
         """5 questions, all mocked as CORRECT (100 XP each) = 500 XP, plus
         the completion bonus (50 XP) since every question was answered."""
         session_id, _ = self._create_and_answer_all(client, auth_headers)
@@ -280,7 +389,9 @@ class TestCompleteSession:
         assert data["total_xp"] == data["xp_earned"]
         assert len(data["breakdown"]) == 5
 
-    def test_complete_session_without_answering_everything_gets_no_bonus(self, client, auth_headers):
+    def test_complete_session_without_answering_everything_gets_no_bonus(
+        self, client, auth_headers
+    ):
         created = _create_session(client, auth_headers)
         session_id = created.get_json()["session_id"]
         first_question_id = created.get_json()["questions"][0]["question_id"]
@@ -298,7 +409,9 @@ class TestCompleteSession:
         assert data["bonus_applied"] is False
         assert data["xp_earned"] == 100  # just the one CORRECT answer, no bonus
 
-    def test_complete_session_twice_returns_409_and_does_not_award_xp_again(self, client, auth_headers):
+    def test_complete_session_twice_returns_409_and_does_not_award_xp_again(
+        self, client, auth_headers
+    ):
         """Idempotency guard: completing an already-completed session must
         not double-award XP."""
         session_id, _ = self._create_and_answer_all(client, auth_headers)
@@ -309,6 +422,7 @@ class TestCompleteSession:
         assert second.status_code == 409
 
         from app.models.user import User
+
         user_id = auth_headers["user_id"]
         user = User.query.filter_by(user_id=user_id).first()
         assert user.total_xp == xp_after_first
@@ -317,9 +431,13 @@ class TestCompleteSession:
         resp = client.post("/sessions/99999/complete", headers=auth_headers)
         assert resp.status_code == 404
 
-    def test_complete_session_of_another_user_returns_404(self, client, auth_headers, second_user_headers):
+    def test_complete_session_of_another_user_returns_404(
+        self, client, auth_headers, second_user_headers
+    ):
         session_id, _ = self._create_and_answer_all(client, auth_headers)
-        resp = client.post(f"/sessions/{session_id}/complete", headers=second_user_headers)
+        resp = client.post(
+            f"/sessions/{session_id}/complete", headers=second_user_headers
+        )
         assert resp.status_code == 404
 
     def test_complete_session_requires_auth(self, client, auth_headers):
@@ -363,7 +481,8 @@ class TestSessionIntegrity:
         for q in created["questions"]:
             client.patch(
                 f"/sessions/{created['session_id']}/questions/{q['question_id']}",
-                json={"answer": "x"}, headers=headers,
+                json={"answer": "x"},
+                headers=headers,
             )
         return created["session_id"]
 
@@ -372,6 +491,7 @@ class TestSessionIntegrity:
         """Makes `Model.query...first()` return the given stand-in for each
         model name (e.g. Session=..., User=...), as if read before a commit."""
         from sqlalchemy.orm import Query
+
         real_first = Query.first
 
         def first(self):
@@ -386,14 +506,22 @@ class TestSessionIntegrity:
         from app import db
         from app.models.user import User
         from sqlalchemy import select
-        db.session.rollback()
-        return db.session.execute(select(User.total_xp).where(User.user_id == user_id)).scalar_one()
 
-    def test_two_overlapping_completions_of_one_session_award_xp_once(self, client, auth_headers, monkeypatch):
+        db.session.rollback()
+        return db.session.execute(
+            select(User.total_xp).where(User.user_id == user_id)
+        ).scalar_one()
+
+    def test_two_overlapping_completions_of_one_session_award_xp_once(
+        self, client, auth_headers, monkeypatch
+    ):
         from types import SimpleNamespace
+
         session_id = self._answer_all(client, auth_headers)
         stale_session = SimpleNamespace(
-            session_id=session_id, user_id=auth_headers["user_id"], is_completed=False,
+            session_id=session_id,
+            user_id=auth_headers["user_id"],
+            is_completed=False,
         )
         first = client.post(f"/sessions/{session_id}/complete", headers=auth_headers)
         assert first.status_code == 200
@@ -405,11 +533,16 @@ class TestSessionIntegrity:
         assert second.status_code == 409
         assert self._total_xp(auth_headers["user_id"]) == first.get_json()["xp_earned"]
 
-    def test_completing_two_sessions_from_a_stale_user_counts_both(self, client, auth_headers, monkeypatch):
+    def test_completing_two_sessions_from_a_stale_user_counts_both(
+        self, client, auth_headers, monkeypatch
+    ):
         from types import SimpleNamespace
+
         session_a = self._answer_all(client, auth_headers)
         session_b = self._answer_all(client, auth_headers)
-        stale_user = SimpleNamespace(user_id=auth_headers["user_id"], total_xp=0, level=1)
+        stale_user = SimpleNamespace(
+            user_id=auth_headers["user_id"], total_xp=0, level=1
+        )
 
         a = client.post(f"/sessions/{session_a}/complete", headers=auth_headers)
         # The request for B read the user before A's award was committed.
@@ -422,11 +555,15 @@ class TestSessionIntegrity:
         assert self._total_xp(auth_headers["user_id"]) == total
         assert b.get_json()["total_xp"] == total
 
-    def test_level_follows_the_xp_accumulated_in_the_database(self, client, auth_headers):
+    def test_level_follows_the_xp_accumulated_in_the_database(
+        self, client, auth_headers
+    ):
         """Three full sessions (550 XP each) cross the 500 XP-per-level step."""
         for _ in range(3):
             session_id = self._answer_all(client, auth_headers)
-            data = client.post(f"/sessions/{session_id}/complete", headers=auth_headers).get_json()
+            data = client.post(
+                f"/sessions/{session_id}/complete", headers=auth_headers
+            ).get_json()
         assert data["total_xp"] == 1650
         assert data["level"] == 4
         assert data["xp_to_next_level"] == 350
@@ -436,16 +573,23 @@ class TestSessionIntegrity:
         from app import db
         from app.models.session import Session
         from sqlalchemy import text
+
         session_id = self._answer_all(client, auth_headers)
-        db.session.execute(text("DELETE FROM user WHERE user_id = :u"), {"u": auth_headers["user_id"]})
+        db.session.execute(
+            text("DELETE FROM user WHERE user_id = :u"), {"u": auth_headers["user_id"]}
+        )
         db.session.commit()
 
         resp = client.post(f"/sessions/{session_id}/complete", headers=auth_headers)
 
         assert resp.status_code == 404
-        assert Session.query.filter_by(session_id=session_id).first().is_completed is False
+        assert (
+            Session.query.filter_by(session_id=session_id).first().is_completed is False
+        )
 
-    def test_answering_a_completed_session_returns_409(self, client, auth_headers, monkeypatch):
+    def test_answering_a_completed_session_returns_409(
+        self, client, auth_headers, monkeypatch
+    ):
         session_id = self._answer_all(client, auth_headers)
         client.post(f"/sessions/{session_id}/complete", headers=auth_headers)
         called = []
@@ -454,34 +598,47 @@ class TestSessionIntegrity:
             lambda *a, **k: called.append(1) or dict(FAKE_FEEDBACK),
         )
         from app.models.question import Question
+
         question = Question.query.filter_by(session_id=session_id).first()
         before = question.answer
 
         resp = client.patch(
             f"/sessions/{session_id}/questions/{question.question_id}",
-            json={"answer": "changed after completing"}, headers=auth_headers,
+            json={"answer": "changed after completing"},
+            headers=auth_headers,
         )
 
         assert resp.status_code == 409
         assert called == []
-        assert Question.query.filter_by(question_id=question.question_id).first().answer == before
+        assert (
+            Question.query.filter_by(question_id=question.question_id).first().answer
+            == before
+        )
 
-    def test_a_generator_crash_leaves_no_session_behind(self, client, auth_headers, monkeypatch):
+    def test_a_generator_crash_leaves_no_session_behind(
+        self, client, auth_headers, monkeypatch
+    ):
         def boom(stack, level, topic):
             raise RuntimeError("worker died")
 
         monkeypatch.setattr("app.routes.sessions.generate_questions", boom)
 
-        with pytest.raises(RuntimeError):  # TESTING propagates what production turns into a 500
+        with pytest.raises(
+            RuntimeError
+        ):  # TESTING propagates what production turns into a 500
             _create_session(client, auth_headers)
 
         from app.models.session import Session
         from app.models.question import Question
+
         assert Session.query.count() == 0
         assert Question.query.count() == 0
 
-    def test_no_session_row_exists_while_the_questions_are_generated(self, client, auth_headers, monkeypatch):
+    def test_no_session_row_exists_while_the_questions_are_generated(
+        self, client, auth_headers, monkeypatch
+    ):
         from app.models.session import Session
+
         seen = []
 
         def spy(stack, level, topic):
@@ -534,7 +691,9 @@ class TestRateLimiting:
         )
         assert resp.status_code == 429
 
-    def test_rate_limit_is_scoped_per_user(self, client, auth_headers, second_user_headers):
+    def test_rate_limit_is_scoped_per_user(
+        self, client, auth_headers, second_user_headers
+    ):
         """User A hitting their per-user limit must not block user B."""
         for _ in range(5):
             resp = _create_session(client, auth_headers)
@@ -549,8 +708,10 @@ class TestRateLimiting:
 def _ai_down(monkeypatch, name, status=503, retry_after=None):
     """Make the given AI function (generate_questions / generate_feedback)
     fail the way a Groq outage does."""
+
     def boom(*args, **kwargs):
         raise AIUnavailableError("IA caída", status=status, retry_after=retry_after)
+
     monkeypatch.setattr(f"app.routes.sessions.{name}", boom)
 
 
@@ -563,14 +724,18 @@ def _restore_feedback(monkeypatch):
 
 def _patch_answer(client, headers, session_id, question_id, answer="my answer"):
     return client.patch(
-        f"/sessions/{session_id}/questions/{question_id}", json={"answer": answer}, headers=headers
+        f"/sessions/{session_id}/questions/{question_id}",
+        json={"answer": answer},
+        headers=headers,
     )
 
 
 class TestAIFailures:
     """A Groq failure must surface as a typed error, never as a fake grade."""
 
-    def test_rate_limited_feedback_returns_429_with_retry_after_and_no_result(self, client, auth_headers, monkeypatch):
+    def test_rate_limited_feedback_returns_429_with_retry_after_and_no_result(
+        self, client, auth_headers, monkeypatch
+    ):
         created = _create_session(client, auth_headers)
         session_id = created.get_json()["session_id"]
         question_id = created.get_json()["questions"][0]["question_id"]
@@ -582,11 +747,14 @@ class TestAIFailures:
         assert resp.headers["Retry-After"] == "42"
         assert resp.get_json() == {"error": "IA caída"}
         from app.models.question import Question
+
         saved = Question.query.filter_by(question_id=question_id).first()
         assert saved.result is None
         assert saved.feedback is None
 
-    def test_failed_feedback_without_retry_after_has_no_retry_after_header(self, client, auth_headers, monkeypatch):
+    def test_failed_feedback_without_retry_after_has_no_retry_after_header(
+        self, client, auth_headers, monkeypatch
+    ):
         created = _create_session(client, auth_headers)
         session_id = created.get_json()["session_id"]
         question_id = created.get_json()["questions"][0]["question_id"]
@@ -597,23 +765,38 @@ class TestAIFailures:
         assert resp.status_code == 503
         assert "Retry-After" not in resp.headers
 
-    def test_failed_feedback_keeps_the_saved_answer(self, client, auth_headers, monkeypatch):
+    def test_failed_feedback_keeps_the_saved_answer(
+        self, client, auth_headers, monkeypatch
+    ):
         created = _create_session(client, auth_headers)
         session_id = created.get_json()["session_id"]
         question_id = created.get_json()["questions"][0]["question_id"]
         _ai_down(monkeypatch, "generate_feedback")
 
-        _patch_answer(client, auth_headers, session_id, question_id, answer="mi respuesta")
+        _patch_answer(
+            client, auth_headers, session_id, question_id, answer="mi respuesta"
+        )
 
         from app.models.question import Question
-        assert Question.query.filter_by(question_id=question_id).first().answer == "mi respuesta"
 
-    def test_failed_feedback_earns_zero_xp_when_completing_the_session(self, client, auth_headers, monkeypatch):
+        assert (
+            Question.query.filter_by(question_id=question_id).first().answer
+            == "mi respuesta"
+        )
+
+    def test_failed_feedback_earns_zero_xp_when_completing_the_session(
+        self, client, auth_headers, monkeypatch
+    ):
         created = _create_session(client, auth_headers)
         session_id = created.get_json()["session_id"]
         _ai_down(monkeypatch, "generate_feedback")
         for q in created.get_json()["questions"]:
-            assert _patch_answer(client, auth_headers, session_id, q["question_id"]).status_code == 503
+            assert (
+                _patch_answer(
+                    client, auth_headers, session_id, q["question_id"]
+                ).status_code
+                == 503
+            )
 
         resp = client.post(f"/sessions/{session_id}/complete", headers=auth_headers)
 
@@ -623,12 +806,17 @@ class TestAIFailures:
         assert data["bonus_applied"] is False
         assert data["breakdown"] == []
 
-    def test_same_answer_can_be_retried_after_a_failure(self, client, auth_headers, monkeypatch):
+    def test_same_answer_can_be_retried_after_a_failure(
+        self, client, auth_headers, monkeypatch
+    ):
         created = _create_session(client, auth_headers)
         session_id = created.get_json()["session_id"]
         question_id = created.get_json()["questions"][0]["question_id"]
         _ai_down(monkeypatch, "generate_feedback")
-        assert _patch_answer(client, auth_headers, session_id, question_id).status_code == 503
+        assert (
+            _patch_answer(client, auth_headers, session_id, question_id).status_code
+            == 503
+        )
 
         _restore_feedback(monkeypatch)
         resp = _patch_answer(client, auth_headers, session_id, question_id)
@@ -636,31 +824,57 @@ class TestAIFailures:
         assert resp.status_code == 200
         assert resp.get_json()["result"] == "CORRECT"
         from app.models.question import Question
-        assert Question.query.filter_by(question_id=question_id).first().result == "CORRECT"
 
-    def test_resubmitted_answer_with_failing_ai_drops_the_previous_grade(self, client, auth_headers, monkeypatch):
+        assert (
+            Question.query.filter_by(question_id=question_id).first().result
+            == "CORRECT"
+        )
+
+    def test_resubmitted_answer_with_failing_ai_drops_the_previous_grade(
+        self, client, auth_headers, monkeypatch
+    ):
         created = _create_session(client, auth_headers)
         session_id = created.get_json()["session_id"]
         question_id = created.get_json()["questions"][0]["question_id"]
-        assert _patch_answer(client, auth_headers, session_id, question_id, answer="primera").status_code == 200
+        assert (
+            _patch_answer(
+                client, auth_headers, session_id, question_id, answer="primera"
+            ).status_code
+            == 200
+        )
         _ai_down(monkeypatch, "generate_feedback", status=502)
 
-        resp = _patch_answer(client, auth_headers, session_id, question_id, answer="segunda")
+        resp = _patch_answer(
+            client, auth_headers, session_id, question_id, answer="segunda"
+        )
 
         assert resp.status_code == 502
         from app.models.question import Question
+
         saved = Question.query.filter_by(question_id=question_id).first()
         assert saved.answer == "segunda"
         assert saved.result is None
         assert saved.feedback is None
 
-    def test_resubmitted_answer_with_failing_ai_earns_no_xp_for_that_question(self, client, auth_headers, monkeypatch):
+    def test_resubmitted_answer_with_failing_ai_earns_no_xp_for_that_question(
+        self, client, auth_headers, monkeypatch
+    ):
         created = _create_session(client, auth_headers)
         session_id = created.get_json()["session_id"]
         question_id = created.get_json()["questions"][0]["question_id"]
-        assert _patch_answer(client, auth_headers, session_id, question_id, answer="primera").status_code == 200
+        assert (
+            _patch_answer(
+                client, auth_headers, session_id, question_id, answer="primera"
+            ).status_code
+            == 200
+        )
         _ai_down(monkeypatch, "generate_feedback", status=502)
-        assert _patch_answer(client, auth_headers, session_id, question_id, answer="segunda").status_code == 502
+        assert (
+            _patch_answer(
+                client, auth_headers, session_id, question_id, answer="segunda"
+            ).status_code
+            == 502
+        )
 
         resp = client.post(f"/sessions/{session_id}/complete", headers=auth_headers)
 
@@ -669,25 +883,46 @@ class TestAIFailures:
         assert data["xp_earned"] == 0
         assert data["breakdown"] == []
 
-    def test_resubmitted_answer_with_working_ai_replaces_the_previous_grade(self, client, auth_headers, monkeypatch):
+    def test_resubmitted_answer_with_working_ai_replaces_the_previous_grade(
+        self, client, auth_headers, monkeypatch
+    ):
         created = _create_session(client, auth_headers)
         session_id = created.get_json()["session_id"]
         question_id = created.get_json()["questions"][0]["question_id"]
-        assert _patch_answer(client, auth_headers, session_id, question_id, answer="primera").status_code == 200
+        assert (
+            _patch_answer(
+                client, auth_headers, session_id, question_id, answer="primera"
+            ).status_code
+            == 200
+        )
         monkeypatch.setattr(
             "app.routes.sessions.generate_feedback",
             lambda stack, question, answer, question_type="code": {
-                **FAKE_FEEDBACK, "result": "INCORRECT", "feedback": "Nueva.",
+                **FAKE_FEEDBACK,
+                "result": "INCORRECT",
+                "feedback": "Nueva.",
             },
         )
 
-        assert _patch_answer(client, auth_headers, session_id, question_id, answer="segunda").status_code == 200
+        assert (
+            _patch_answer(
+                client, auth_headers, session_id, question_id, answer="segunda"
+            ).status_code
+            == 200
+        )
 
         from app.models.question import Question
-        saved = Question.query.filter_by(question_id=question_id).first()
-        assert (saved.answer, saved.result, saved.feedback) == ("segunda", "INCORRECT", "Nueva.")
 
-    def test_create_session_with_unusable_questions_returns_502_and_leaves_no_session(self, client, auth_headers, monkeypatch):
+        saved = Question.query.filter_by(question_id=question_id).first()
+        assert (saved.answer, saved.result, saved.feedback) == (
+            "segunda",
+            "INCORRECT",
+            "Nueva.",
+        )
+
+    def test_create_session_with_unusable_questions_returns_502_and_leaves_no_session(
+        self, client, auth_headers, monkeypatch
+    ):
         _ai_down(monkeypatch, "generate_questions", status=502)
 
         resp = _create_session(client, auth_headers)
@@ -695,10 +930,13 @@ class TestAIFailures:
         assert resp.status_code == 502
         from app.models.session import Session
         from app.models.question import Question
+
         assert Session.query.count() == 0
         assert Question.query.count() == 0
 
-    def test_create_session_with_ai_down_returns_503_and_leaves_no_session(self, client, auth_headers, monkeypatch):
+    def test_create_session_with_ai_down_returns_503_and_leaves_no_session(
+        self, client, auth_headers, monkeypatch
+    ):
         _ai_down(monkeypatch, "generate_questions")
 
         resp = _create_session(client, auth_headers)
@@ -707,10 +945,13 @@ class TestAIFailures:
         assert resp.get_json() == {"error": "IA caída"}
         from app.models.session import Session
         from app.models.question import Question
+
         assert Session.query.count() == 0
         assert Question.query.count() == 0
 
-    def test_create_session_rate_limited_by_the_provider_returns_429_with_retry_after(self, client, auth_headers, monkeypatch):
+    def test_create_session_rate_limited_by_the_provider_returns_429_with_retry_after(
+        self, client, auth_headers, monkeypatch
+    ):
         _ai_down(monkeypatch, "generate_questions", status=429, retry_after=30)
 
         resp = _create_session(client, auth_headers)
@@ -718,35 +959,49 @@ class TestAIFailures:
         assert resp.status_code == 429
         assert resp.headers["Retry-After"] == "30"
         from app.models.session import Session
+
         assert Session.query.count() == 0
 
 
 class TestQuotaOnAIFailures:
     """Failed AI calls must not eat the user's hourly quota."""
 
-    def test_sixteen_failed_corrections_do_not_exhaust_the_hourly_limit(self, client, auth_headers, monkeypatch):
+    def test_sixteen_failed_corrections_do_not_exhaust_the_hourly_limit(
+        self, client, auth_headers, monkeypatch
+    ):
         created = _create_session(client, auth_headers)
         session_id = created.get_json()["session_id"]
         question_id = created.get_json()["questions"][0]["question_id"]
         _ai_down(monkeypatch, "generate_feedback")
 
         for _ in range(16):
-            assert _patch_answer(client, auth_headers, session_id, question_id).status_code == 503
+            assert (
+                _patch_answer(client, auth_headers, session_id, question_id).status_code
+                == 503
+            )
 
         _restore_feedback(monkeypatch)
-        assert _patch_answer(client, auth_headers, session_id, question_id).status_code == 200
+        assert (
+            _patch_answer(client, auth_headers, session_id, question_id).status_code
+            == 200
+        )
 
-    def test_six_failed_session_creations_do_not_exhaust_the_hourly_limit(self, client, auth_headers, monkeypatch):
+    def test_six_failed_session_creations_do_not_exhaust_the_hourly_limit(
+        self, client, auth_headers, monkeypatch
+    ):
         _ai_down(monkeypatch, "generate_questions")
         for _ in range(6):
             assert _create_session(client, auth_headers).status_code == 503
 
         monkeypatch.setattr(
-            "app.routes.sessions.generate_questions", lambda stack, level, topic: dict(FAKE_QUESTIONS)
+            "app.routes.sessions.generate_questions",
+            lambda stack, level, topic: dict(FAKE_QUESTIONS),
         )
         assert _create_session(client, auth_headers).status_code == 201
 
-    def test_failed_calls_do_not_drain_the_global_groq_budget(self, client, auth_headers, monkeypatch):
+    def test_failed_calls_do_not_drain_the_global_groq_budget(
+        self, client, auth_headers, monkeypatch
+    ):
         """The shared budget is 20/min: 25 failures in a row must all reach
         the AI (503), none may be rejected by a limiter (429)."""
         created = _create_session(client, auth_headers)
@@ -754,7 +1009,10 @@ class TestQuotaOnAIFailures:
         question_id = created.get_json()["questions"][0]["question_id"]
         _ai_down(monkeypatch, "generate_feedback")
 
-        statuses = [_patch_answer(client, auth_headers, session_id, question_id).status_code for _ in range(25)]
+        statuses = [
+            _patch_answer(client, auth_headers, session_id, question_id).status_code
+            for _ in range(25)
+        ]
 
         assert set(statuses) == {503}
 
@@ -763,8 +1021,11 @@ class TestNoLlmCallInsideTransaction:
     """A Groq call can take many seconds: the request must not hold an open DB
     transaction (and its connection) while it waits."""
 
-    def test_create_session_calls_ai_outside_a_transaction(self, client, auth_headers, monkeypatch):
+    def test_create_session_calls_ai_outside_a_transaction(
+        self, client, auth_headers, monkeypatch
+    ):
         from app import db
+
         seen = []
 
         def spy(stack, level, topic):
@@ -778,8 +1039,11 @@ class TestNoLlmCallInsideTransaction:
         assert resp.status_code == 201
         assert seen == [False]
 
-    def test_answer_question_calls_ai_outside_a_transaction(self, client, auth_headers, monkeypatch):
+    def test_answer_question_calls_ai_outside_a_transaction(
+        self, client, auth_headers, monkeypatch
+    ):
         from app import db
+
         data = _create_session(client, auth_headers).get_json()
         seen = []
 
@@ -792,7 +1056,8 @@ class TestNoLlmCallInsideTransaction:
 
         resp = client.patch(
             f"/sessions/{data['session_id']}/questions/{first['question_id']}",
-            json={"answer": "my answer"}, headers=auth_headers,
+            json={"answer": "my answer"},
+            headers=auth_headers,
         )
 
         assert resp.status_code == 200

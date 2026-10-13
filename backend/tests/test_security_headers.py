@@ -3,6 +3,7 @@ Tests for the security headers every API response carries (after_request in
 app/__init__.py). The API only serves JSON and redirects, so the CSP is
 fully closed; HSTS is production-only because plain-HTTP dev must keep working.
 """
+
 from unittest.mock import patch
 
 import pytest
@@ -44,7 +45,9 @@ class TestHeadersOnEveryResponse:
 
     def test_redirect_keeps_its_location(self, client, db):
         with patch("app.routes.oauth.oauth") as mock_oauth:
-            mock_oauth.google.authorize_access_token.side_effect = Exception("Token error")
+            mock_oauth.google.authorize_access_token.side_effect = Exception(
+                "Token error"
+            )
             resp = client.get("/auth/google/callback")
         assert resp.status_code == 302
         assert resp.location == "http://localhost:3000/login?error=oauth_failed"
@@ -52,7 +55,9 @@ class TestHeadersOnEveryResponse:
 
     def test_cors_headers_are_not_disturbed(self, client):
         resp = client.get("/no-such-route", headers={"Origin": "http://localhost:3000"})
-        assert resp.headers.get("Access-Control-Allow-Origin") == "http://localhost:3000"
+        assert (
+            resp.headers.get("Access-Control-Allow-Origin") == "http://localhost:3000"
+        )
         _assert_base_headers(resp)
 
 
@@ -69,7 +74,9 @@ class TestHsts:
 
     def test_present_in_production_on_redirects(self, production_client):
         with patch("app.routes.oauth.oauth") as mock_oauth:
-            mock_oauth.google.authorize_access_token.side_effect = Exception("Token error")
+            mock_oauth.google.authorize_access_token.side_effect = Exception(
+                "Token error"
+            )
             resp = production_client.get("/auth/google/callback")
         assert resp.status_code == 302
         assert "error=oauth_failed" in resp.location

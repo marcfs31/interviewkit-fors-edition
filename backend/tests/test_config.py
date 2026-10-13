@@ -2,6 +2,7 @@
 Tests for fail-closed environment configuration (app/config.py) and the
 places that consume it (debug blueprint registration, Sentry environment).
 """
+
 import pytest
 
 from app import create_app

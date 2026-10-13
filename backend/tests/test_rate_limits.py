@@ -2,6 +2,7 @@
 Rate limits of the unauthenticated auth endpoints, the per-user daily cap on
 the AI endpoints, and the limiter storage configuration.
 """
+
 import logging
 import time
 import types
@@ -26,9 +27,15 @@ FAKE_FEEDBACK = {
     "result": "CORRECT",
     "feedback": "Well done.",
     "card": {
-        "concept": "Closures", "definition": "...", "explanation": "...",
-        "use_case": "...", "avoid_when": "", "mnemonic": "", "code": "",
-        "code_language": "javascript", "tags": [],
+        "concept": "Closures",
+        "definition": "...",
+        "explanation": "...",
+        "use_case": "...",
+        "avoid_when": "",
+        "mnemonic": "",
+        "code": "",
+        "code_language": "javascript",
+        "tags": [],
     },
 }
 
@@ -61,11 +68,20 @@ class TestAuthEndpointLimits:
 
         assert other.status_code != 429
 
-    def test_clients_behind_the_proxy_are_keyed_by_forwarded_ip(self, client, url, payload, allowed):
+    def test_clients_behind_the_proxy_are_keyed_by_forwarded_ip(
+        self, client, url, payload, allowed
+    ):
         headers = {"X-Forwarded-For": "203.0.113.5"}
-        assert _post_until_limited(client, url, payload, allowed, headers=headers).status_code == 429
+        assert (
+            _post_until_limited(
+                client, url, payload, allowed, headers=headers
+            ).status_code
+            == 429
+        )
 
-        same_proxy_other_client = client.post(url, json=payload, headers={"X-Forwarded-For": "203.0.113.6"})
+        same_proxy_other_client = client.post(
+            url, json=payload, headers={"X-Forwarded-For": "203.0.113.6"}
+        )
 
         assert same_proxy_other_client.status_code != 429
 
@@ -74,7 +90,10 @@ def test_login_key_ignores_the_jwt_identity(client, auth_headers):
     """A request carrying a valid JWT is still counted by IP: the key must not
     depend on who the caller claims to be."""
     for _ in range(10):
-        assert client.post("/auth/login", json=BAD_LOGIN, headers=auth_headers).status_code != 429
+        assert (
+            client.post("/auth/login", json=BAD_LOGIN, headers=auth_headers).status_code
+            != 429
+        )
 
     anonymous = client.post("/auth/login", json=BAD_LOGIN)
 
@@ -83,7 +102,10 @@ def test_login_key_ignores_the_jwt_identity(client, auth_headers):
 
 @pytest.fixture
 def _mock_ai(monkeypatch):
-    monkeypatch.setattr("app.routes.sessions.generate_questions", lambda stack, level, topic: dict(FAKE_QUESTIONS))
+    monkeypatch.setattr(
+        "app.routes.sessions.generate_questions",
+        lambda stack, level, topic: dict(FAKE_QUESTIONS),
+    )
     monkeypatch.setattr(
         "app.routes.sessions.generate_feedback",
         lambda stack, question, answer, question_type="code": dict(FAKE_FEEDBACK),
@@ -104,7 +126,9 @@ def _clock(monkeypatch):
 class TestPerUserDailyAICap:
     def _answer(self, client, headers, session_id, question_id):
         return client.patch(
-            f"/sessions/{session_id}/questions/{question_id}", json={"answer": "x"}, headers=headers,
+            f"/sessions/{session_id}/questions/{question_id}",
+            json={"answer": "x"},
+            headers=headers,
         )
 
     def _spend_the_daily_cap(self, client, headers):
@@ -117,28 +141,50 @@ class TestPerUserDailyAICap:
         session_id = created.get_json()["session_id"]
         question_id = created.get_json()["questions"][0]["question_id"]
         for _ in range(15):
-            assert self._answer(client, headers, session_id, question_id).status_code == 200
+            assert (
+                self._answer(client, headers, session_id, question_id).status_code
+                == 200
+            )
         return session_id, question_id
 
     def test_cap_is_shared_by_create_and_answer(self, client, auth_headers, _clock):
         session_id, question_id = self._spend_the_daily_cap(client, auth_headers)
         _clock["seconds"] = 3601  # hourly windows expire, the daily one doesn't
 
-        assert client.post("/sessions/", json=AI_PAYLOAD, headers=auth_headers).status_code == 429
-        assert self._answer(client, auth_headers, session_id, question_id).status_code == 429
+        assert (
+            client.post("/sessions/", json=AI_PAYLOAD, headers=auth_headers).status_code
+            == 429
+        )
+        assert (
+            self._answer(client, auth_headers, session_id, question_id).status_code
+            == 429
+        )
 
-    def test_cap_does_not_affect_another_user(self, client, auth_headers, second_user_headers, _clock):
+    def test_cap_does_not_affect_another_user(
+        self, client, auth_headers, second_user_headers, _clock
+    ):
         self._spend_the_daily_cap(client, auth_headers)
         _clock["seconds"] = 3601
 
-        assert client.post("/sessions/", json=AI_PAYLOAD, headers=auth_headers).status_code == 429
-        assert client.post("/sessions/", json=AI_PAYLOAD, headers=second_user_headers).status_code == 201
+        assert (
+            client.post("/sessions/", json=AI_PAYLOAD, headers=auth_headers).status_code
+            == 429
+        )
+        assert (
+            client.post(
+                "/sessions/", json=AI_PAYLOAD, headers=second_user_headers
+            ).status_code
+            == 201
+        )
 
     def test_cap_resets_after_a_day(self, client, auth_headers, _clock):
         self._spend_the_daily_cap(client, auth_headers)
         _clock["seconds"] = 24 * 3600 + 1
 
-        assert client.post("/sessions/", json=AI_PAYLOAD, headers=auth_headers).status_code == 201
+        assert (
+            client.post("/sessions/", json=AI_PAYLOAD, headers=auth_headers).status_code
+            == 201
+        )
 
 
 class TestStorageConfiguration:
@@ -177,7 +223,9 @@ class TestProductionWarning:
 
     def test_silent_when_a_shared_storage_is_configured(self, caplog):
         with caplog.at_level(logging.WARNING, logger="app"):
-            _warn_if_limits_are_per_process(self._app("production", "redis://cache.internal:6379/0"))
+            _warn_if_limits_are_per_process(
+                self._app("production", "redis://cache.internal:6379/0")
+            )
 
         assert caplog.records == []
 

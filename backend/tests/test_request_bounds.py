@@ -2,6 +2,7 @@
 Request-level bounds owned by the app factory: the 64 KiB body cap (413) and
 the single check that a JSON body is an object (400), both answered as JSON.
 """
+
 import json
 
 import pytest
@@ -21,7 +22,9 @@ def _login_body_of_size(size):
 class TestBodySizeLimit:
     def test_body_over_the_limit_returns_json_413(self, client):
         resp = client.post(
-            "/auth/login", data=_login_body_of_size(MAX_BODY + 1), content_type="application/json"
+            "/auth/login",
+            data=_login_body_of_size(MAX_BODY + 1),
+            content_type="application/json",
         )
         assert resp.status_code == 413
         assert resp.is_json
@@ -29,7 +32,9 @@ class TestBodySizeLimit:
 
     def test_body_exactly_at_the_limit_is_accepted(self, client):
         resp = client.post(
-            "/auth/login", data=_login_body_of_size(MAX_BODY), content_type="application/json"
+            "/auth/login",
+            data=_login_body_of_size(MAX_BODY),
+            content_type="application/json",
         )
         assert resp.status_code == 400
         assert resp.get_json()["error"] == "Credenciales incorrectas"
@@ -37,14 +42,18 @@ class TestBodySizeLimit:
 
 class TestJsonBodyShape:
     @pytest.mark.parametrize("body", ["[1, 2]", '"text"', "42", "null", "true", "[]"])
-    @pytest.mark.parametrize("url", ["/auth/register", "/auth/login", "/auth/oauth/exchange"])
+    @pytest.mark.parametrize(
+        "url", ["/auth/register", "/auth/login", "/auth/oauth/exchange"]
+    )
     def test_non_object_json_body_returns_json_400(self, client, url, body):
         resp = client.post(url, data=body, content_type="application/json")
         assert resp.status_code == 400
         assert resp.is_json
         assert "objeto JSON" in resp.get_json()["error"]
 
-    def test_non_object_body_is_rejected_on_patch_before_the_handler(self, client, auth_headers):
+    def test_non_object_body_is_rejected_on_patch_before_the_handler(
+        self, client, auth_headers
+    ):
         resp = client.patch("/me/profile", data="[1]", headers=auth_headers)
         assert resp.status_code == 400
         assert "objeto JSON" in resp.get_json()["error"]
@@ -57,7 +66,9 @@ class TestJsonBodyShape:
         assert "objeto JSON" in resp.get_json()["error"]
 
     def test_malformed_json_returns_json_400_not_html(self, client):
-        resp = client.post("/auth/login", data="{not json", content_type="application/json")
+        resp = client.post(
+            "/auth/login", data="{not json", content_type="application/json"
+        )
         assert resp.status_code == 400
         assert resp.is_json
         assert "JSON" in resp.get_json()["error"]
@@ -68,7 +79,9 @@ class TestJsonBodyShape:
         assert resp.is_json
 
     def test_object_body_reaches_the_handler(self, client):
-        resp = client.post("/auth/login", json={"email": "a@example.com", "password": "x"})
+        resp = client.post(
+            "/auth/login", json={"email": "a@example.com", "password": "x"}
+        )
         assert resp.status_code == 400
         assert resp.get_json()["error"] == "Credenciales incorrectas"
 
@@ -92,7 +105,9 @@ class TestCardIdsMustBeIntegers:
 
     @pytest.mark.parametrize("field", ["session_id", "question_id"])
     @pytest.mark.parametrize("value", [[1], {"a": 1}, "1", True, None])
-    def test_create_card_with_a_non_integer_id_returns_400(self, client, auth_headers, field, value):
+    def test_create_card_with_a_non_integer_id_returns_400(
+        self, client, auth_headers, field, value
+    ):
         payload = {"session_id": 1, "question_id": 1, "concept": "c", field: value}
         resp = client.post("/cards/", json=payload, headers=auth_headers)
         assert resp.status_code == 400

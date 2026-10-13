@@ -36,18 +36,27 @@ def load_env_settings(environ):
 
     secret_key = environ.get("SECRET_KEY")
     if not secret_key:
-        raise RuntimeError("SECRET_KEY is required. Set it in .env or the environment variables.")
+        raise RuntimeError(
+            "SECRET_KEY is required. Set it in .env or the environment variables."
+        )
     jwt_secret_key = environ.get("JWT_SECRET_KEY")
     if not jwt_secret_key:
-        raise RuntimeError("JWT_SECRET_KEY is required. Set it in .env or the environment variables.")
+        raise RuntimeError(
+            "JWT_SECRET_KEY is required. Set it in .env or the environment variables."
+        )
     if is_prod:
-        for name, value in (("SECRET_KEY", secret_key), ("JWT_SECRET_KEY", jwt_secret_key)):
+        for name, value in (
+            ("SECRET_KEY", secret_key),
+            ("JWT_SECRET_KEY", jwt_secret_key),
+        ):
             if len(value) < _MIN_PROD_SECRET_LENGTH:
                 raise RuntimeError(
                     f"{name} must be at least {_MIN_PROD_SECRET_LENGTH} characters in production."
                 )
         if secret_key == jwt_secret_key:
-            raise RuntimeError("SECRET_KEY and JWT_SECRET_KEY must be distinct in production.")
+            raise RuntimeError(
+                "SECRET_KEY and JWT_SECRET_KEY must be distinct in production."
+            )
 
     frontend_url = environ.get("FRONTEND_URL")
     if not frontend_url:

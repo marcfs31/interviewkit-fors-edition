@@ -6,7 +6,7 @@ from ..models.question import Question
 from ..services.ai_service import fix_literal_escapes
 from .. import db
 
-cards = Blueprint('cards', __name__, url_prefix='/cards')
+cards = Blueprint("cards", __name__, url_prefix="/cards")
 
 # Over a cap is a 400, never a silent truncation. concept and code_language
 # are their column sizes; the rest are payload caps (the columns are Text).
@@ -69,7 +69,7 @@ def _validate_card_fields(data):
     return clean, None
 
 
-@cards.route('/', methods=['GET'])
+@cards.route("/", methods=["GET"])
 @jwt_required()
 def get_cards():
     user = get_jwt_identity()
@@ -79,14 +79,13 @@ def get_cards():
 
     return jsonify(response), 200
 
-@cards.route('/<int:card_id>', methods=['PATCH'])
+
+@cards.route("/<int:card_id>", methods=["PATCH"])
 @jwt_required()
 def update_card(card_id):
     user = get_jwt_identity()
 
-    card = Card.query.filter_by(
-        card_id=card_id, user_id=user
-    ).first()
+    card = Card.query.filter_by(card_id=card_id, user_id=user).first()
 
     if card is None:
         return jsonify({"msg": "La card no existe"}), 404
@@ -128,14 +127,12 @@ def update_card(card_id):
     return jsonify(card.serialize()), 200
 
 
-@cards.route('/<int:card_id>', methods=['DELETE'])
+@cards.route("/<int:card_id>", methods=["DELETE"])
 @jwt_required()
 def delete_card(card_id):
     user = get_jwt_identity()
-    
-    card_to_delete = Card.query.filter_by(
-        card_id=card_id, user_id=user
-    ).first()
+
+    card_to_delete = Card.query.filter_by(card_id=card_id, user_id=user).first()
 
     if card_to_delete is None:
         return jsonify({"msg": "la card no existe"}), 404
@@ -143,7 +140,8 @@ def delete_card(card_id):
     db.session.delete(card_to_delete)
     db.session.commit()
 
-    return jsonify( {"msg": "Card Eliminada Exitosamente"}), 200
+    return jsonify({"msg": "Card Eliminada Exitosamente"}), 200
+
 
 # Maps the textual level to a numeric difficulty
 LEVEL_TO_DIFFICULTY = {
@@ -153,7 +151,7 @@ LEVEL_TO_DIFFICULTY = {
 }
 
 
-@cards.route('/', methods=['POST'])
+@cards.route("/", methods=["POST"])
 @jwt_required()
 def create_card():
     user_id = get_jwt_identity()
@@ -162,13 +160,16 @@ def create_card():
     session_id = data.get("session_id")
     question_id = data.get("question_id")
     # bool is an int subclass, and anything else reaches the DB driver as a 500
-    if not all(isinstance(v, int) and not isinstance(v, bool) for v in (session_id, question_id)):
-        return jsonify({"error": "session_id y question_id deben ser números enteros"}), 400
+    if not all(
+        isinstance(v, int) and not isinstance(v, bool)
+        for v in (session_id, question_id)
+    ):
+        return jsonify(
+            {"error": "session_id y question_id deben ser números enteros"}
+        ), 400
 
     # Ownership check: the session must belong to the authenticated user
-    session = Session.query.filter_by(
-        session_id=session_id, user_id=user_id
-    ).first()
+    session = Session.query.filter_by(session_id=session_id, user_id=user_id).first()
     if not session:
         return jsonify({"msg": "La sesion no existe"}), 404
 
@@ -187,9 +188,9 @@ def create_card():
     explanation = clean.get("explanation", "")
     use_case = clean.get("use_case", "")
     if not concept or not explanation or not use_case:
-        return jsonify({
-            "msg": "Los campos concept, explanation y use_case son obligatorios"
-        }), 400
+        return jsonify(
+            {"msg": "Los campos concept, explanation y use_case son obligatorios"}
+        ), 400
 
     # Difficulty is inherited from the session's level
     difficulty = LEVEL_TO_DIFFICULTY.get(session.level)
@@ -212,7 +213,9 @@ def create_card():
     db.session.add(new_card)
     db.session.commit()
 
-    return jsonify({
-        "card_id": new_card.card_id,
-        "concept": new_card.concept,
-    }), 201
+    return jsonify(
+        {
+            "card_id": new_card.card_id,
+            "concept": new_card.concept,
+        }
+    ), 201

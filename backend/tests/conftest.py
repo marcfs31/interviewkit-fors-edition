@@ -24,10 +24,12 @@ from app.models.user import User
 @pytest.fixture(scope="session")
 def app():
     app = create_app()
-    app.config.update({
-        "TESTING": True,
-        "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
-    })
+    app.config.update(
+        {
+            "TESTING": True,
+            "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+        }
+    )
     return app
 
 
@@ -77,6 +79,7 @@ def auth_headers(app, db):
     other rows (sessions, cards, ...) owned by this same user don't have to
     decode the JWT themselves."""
     from flask_jwt_extended import create_access_token
+
     with app.app_context():
         user = User(name="Test User", email="test@example.com")
         user.password = "hashed_password_here"
@@ -99,6 +102,7 @@ def second_user_headers(app, db):
     """A second, distinct user -- used across the suite for cross-user
     isolation tests (user B must never see/edit/delete user A's data)."""
     from flask_jwt_extended import create_access_token
+
     with app.app_context():
         user = User(name="User B", email="userb@example.com")
         user.password = "hashed_password_here"
@@ -118,7 +122,11 @@ def second_user_headers(app, db):
 
 @pytest.fixture(scope="function")
 def registered_user(client, db):
-    payload = {"name": "Test User", "email": "new@example.com", "password": "password123"}
+    payload = {
+        "name": "Test User",
+        "email": "new@example.com",
+        "password": "password123",
+    }
     resp = client.post("/auth/register", json=payload)
     assert resp.status_code == 201
     return payload

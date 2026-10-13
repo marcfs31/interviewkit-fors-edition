@@ -8,10 +8,10 @@ from ..version import __version__
 
 logger = logging.getLogger(__name__)
 
-health = Blueprint('health', __name__)
+health = Blueprint("health", __name__)
 
 
-@health.route('/health', methods=['GET'])
+@health.route("/health", methods=["GET"])
 @limiter.exempt
 def health_check():
     """Liveness + DB check for the platform's monitor. No auth, no rate limit,

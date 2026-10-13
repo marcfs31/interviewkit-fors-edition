@@ -12,6 +12,7 @@ this file focuses on:
 Uses the shared `auth_headers` / `second_user_headers` fixtures from
 conftest.py (each carries a `user_id` key alongside the HTTP headers).
 """
+
 import pytest
 from app.models.session import Session
 from app.models.question import Question
@@ -23,18 +24,26 @@ def session_and_question(app, db, auth_headers):
     """Creates a valid Session + Question, owned by the auth_headers user."""
     with app.app_context():
         session_obj = Session(
-            user_id=auth_headers["user_id"], stack="JavaScript", level="Básico", topic="General / Mixto"
+            user_id=auth_headers["user_id"],
+            stack="JavaScript",
+            level="Básico",
+            topic="General / Mixto",
         )
         db.session.add(session_obj)
         db.session.commit()
 
         question_obj = Question(
-            question="Explain closures", session_id=session_obj.session_id, question_type="code"
+            question="Explain closures",
+            session_id=session_obj.session_id,
+            question_type="code",
         )
         db.session.add(question_obj)
         db.session.commit()
 
-        return {"session_id": session_obj.session_id, "question_id": question_obj.question_id}
+        return {
+            "session_id": session_obj.session_id,
+            "question_id": question_obj.question_id,
+        }
 
 
 VALID_CARD_PAYLOAD_EXTRA = {
@@ -62,6 +71,7 @@ def _valid_card_payload(session_id, question_id):
 # POST /cards/
 # ---------------------------------------------------------------------------
 
+
 class TestCreateCard:
     def test_create_card_success(self, client, auth_headers, session_and_question):
         payload = _valid_card_payload(**session_and_question)
@@ -71,7 +81,9 @@ class TestCreateCard:
         assert data["concept"] == "Closures"
         assert "card_id" in data
 
-    def test_create_card_missing_required_fields_returns_400(self, client, auth_headers, session_and_question):
+    def test_create_card_missing_required_fields_returns_400(
+        self, client, auth_headers, session_and_question
+    ):
         payload = _valid_card_payload(**session_and_question)
         del payload["use_case"]
         resp = client.post("/cards/", json=payload, headers=auth_headers)
@@ -88,7 +100,9 @@ class TestCreateCard:
         resp = client.post("/cards/", json=payload, headers=second_user_headers)
         assert resp.status_code == 404
 
-    def test_create_card_with_nonexistent_session_returns_404(self, client, auth_headers):
+    def test_create_card_with_nonexistent_session_returns_404(
+        self, client, auth_headers
+    ):
         payload = _valid_card_payload(session_id=999999, question_id=1)
         resp = client.post("/cards/", json=payload, headers=auth_headers)
         assert resp.status_code == 404
@@ -100,16 +114,21 @@ class TestCreateCard:
         not merely exist in the database (this is what
         Question.query.filter_by(question_id=..., session_id=...) enforces)."""
         with app.app_context():
-            other_session = Session(user_id=auth_headers["user_id"], stack="Python", level="Básico")
+            other_session = Session(
+                user_id=auth_headers["user_id"], stack="Python", level="Básico"
+            )
             db.session.add(other_session)
             db.session.commit()
-            other_question = Question(question="Q", session_id=other_session.session_id, question_type="code")
+            other_question = Question(
+                question="Q", session_id=other_session.session_id, question_type="code"
+            )
             db.session.add(other_question)
             db.session.commit()
             mismatched_question_id = other_question.question_id
 
         payload = _valid_card_payload(
-            session_id=session_and_question["session_id"], question_id=mismatched_question_id
+            session_id=session_and_question["session_id"],
+            question_id=mismatched_question_id,
         )
         resp = client.post("/cards/", json=payload, headers=auth_headers)
         assert resp.status_code == 404
@@ -128,13 +147,19 @@ class TestCreateCard:
         This shouldn't happen thanks to validation in /sessions/, but if it
         did, the endpoint must not break."""
         with app.app_context():
-            weird_session = Session(user_id=auth_headers["user_id"], stack="Python", level="Weird-Level")
+            weird_session = Session(
+                user_id=auth_headers["user_id"], stack="Python", level="Weird-Level"
+            )
             db.session.add(weird_session)
             db.session.commit()
-            weird_question = Question(question="Q", session_id=weird_session.session_id, question_type="code")
+            weird_question = Question(
+                question="Q", session_id=weird_session.session_id, question_type="code"
+            )
             db.session.add(weird_question)
             db.session.commit()
-            payload = _valid_card_payload(weird_session.session_id, weird_question.question_id)
+            payload = _valid_card_payload(
+                weird_session.session_id, weird_question.question_id
+            )
 
         resp = client.post("/cards/", json=payload, headers=auth_headers)
         assert resp.status_code == 201
@@ -177,10 +202,15 @@ class TestCreateCardBounds:
         created = Card.query.filter_by(card_id=resp.get_json()["card_id"]).first()
         assert getattr(created, field) == "x" * cap
 
-    def test_cap_is_checked_after_strip(self, client, auth_headers, session_and_question):
+    def test_cap_is_checked_after_strip(
+        self, client, auth_headers, session_and_question
+    ):
         payload = _valid_card_payload(**session_and_question)
         payload["concept"] = "  " + "x" * 120 + "  "
-        assert client.post("/cards/", json=payload, headers=auth_headers).status_code == 201
+        assert (
+            client.post("/cards/", json=payload, headers=auth_headers).status_code
+            == 201
+        )
 
     @pytest.mark.parametrize("field", [f for f, _ in TEXT_CAPS])
     @pytest.mark.parametrize("value", [123, ["x"], {"a": 1}])
@@ -189,9 +219,14 @@ class TestCreateCardBounds:
     ):
         payload = _valid_card_payload(**session_and_question)
         payload[field] = value
-        assert client.post("/cards/", json=payload, headers=auth_headers).status_code == 400
+        assert (
+            client.post("/cards/", json=payload, headers=auth_headers).status_code
+            == 400
+        )
 
-    def test_ten_tags_are_accepted_and_each_is_stripped(self, client, auth_headers, session_and_question):
+    def test_ten_tags_are_accepted_and_each_is_stripped(
+        self, client, auth_headers, session_and_question
+    ):
         payload = _valid_card_payload(**session_and_question)
         payload["tags"] = [f" tag{i} " for i in range(10)]
         resp = client.post("/cards/", json=payload, headers=auth_headers)
@@ -206,15 +241,25 @@ class TestCreateCardBounds:
         assert resp.status_code == 400
         assert "tags" in resp.get_json()["msg"]
 
-    def test_tag_of_exactly_40_characters_is_accepted(self, client, auth_headers, session_and_question):
+    def test_tag_of_exactly_40_characters_is_accepted(
+        self, client, auth_headers, session_and_question
+    ):
         payload = _valid_card_payload(**session_and_question)
         payload["tags"] = ["t" * 40]
-        assert client.post("/cards/", json=payload, headers=auth_headers).status_code == 201
+        assert (
+            client.post("/cards/", json=payload, headers=auth_headers).status_code
+            == 201
+        )
 
-    def test_tag_over_40_characters_returns_400(self, client, auth_headers, session_and_question):
+    def test_tag_over_40_characters_returns_400(
+        self, client, auth_headers, session_and_question
+    ):
         payload = _valid_card_payload(**session_and_question)
         payload["tags"] = ["t" * 41]
-        assert client.post("/cards/", json=payload, headers=auth_headers).status_code == 400
+        assert (
+            client.post("/cards/", json=payload, headers=auth_headers).status_code
+            == 400
+        )
 
     @pytest.mark.parametrize(
         "tags",
@@ -230,7 +275,9 @@ class TestCreateCardBounds:
             5,
         ],
     )
-    def test_invalid_tags_return_400_and_store_nothing(self, client, auth_headers, session_and_question, tags):
+    def test_invalid_tags_return_400_and_store_nothing(
+        self, client, auth_headers, session_and_question, tags
+    ):
         payload = _valid_card_payload(**session_and_question)
         payload["tags"] = tags
         resp = client.post("/cards/", json=payload, headers=auth_headers)
@@ -238,15 +285,25 @@ class TestCreateCardBounds:
         assert Card.query.count() == 0
 
     @pytest.mark.parametrize("tags", [None, []])
-    def test_null_or_empty_tags_are_accepted(self, client, auth_headers, session_and_question, tags):
+    def test_null_or_empty_tags_are_accepted(
+        self, client, auth_headers, session_and_question, tags
+    ):
         payload = _valid_card_payload(**session_and_question)
         payload["tags"] = tags
-        assert client.post("/cards/", json=payload, headers=auth_headers).status_code == 201
+        assert (
+            client.post("/cards/", json=payload, headers=auth_headers).status_code
+            == 201
+        )
 
-    def test_omitted_tags_are_accepted(self, client, auth_headers, session_and_question):
+    def test_omitted_tags_are_accepted(
+        self, client, auth_headers, session_and_question
+    ):
         payload = _valid_card_payload(**session_and_question)
         del payload["tags"]
-        assert client.post("/cards/", json=payload, headers=auth_headers).status_code == 201
+        assert (
+            client.post("/cards/", json=payload, headers=auth_headers).status_code
+            == 201
+        )
 
     def test_non_object_body_returns_400(self, client, auth_headers):
         resp = client.post("/cards/", data="[1]", headers=auth_headers)
@@ -256,6 +313,7 @@ class TestCreateCardBounds:
 # ---------------------------------------------------------------------------
 # GET /cards/
 # ---------------------------------------------------------------------------
+
 
 class TestGetCards:
     def test_get_cards_returns_only_own_cards(
@@ -287,6 +345,7 @@ class TestGetCards:
 # PATCH /cards/<id>
 # ---------------------------------------------------------------------------
 
+
 class TestUpdateCard:
     def _create_card(self, client, auth_headers, session_and_question):
         payload = _valid_card_payload(**session_and_question)
@@ -295,33 +354,50 @@ class TestUpdateCard:
 
     def test_update_card_success(self, client, auth_headers, session_and_question):
         card_id = self._create_card(client, auth_headers, session_and_question)
-        resp = client.patch(f"/cards/{card_id}", json={"concept": "Updated closures"}, headers=auth_headers)
+        resp = client.patch(
+            f"/cards/{card_id}",
+            json={"concept": "Updated closures"},
+            headers=auth_headers,
+        )
         assert resp.status_code == 200
         assert resp.get_json()["concept"] == "Updated closures"
 
-    def test_partial_patch_keeps_omitted_fields(self, client, auth_headers, session_and_question):
+    def test_partial_patch_keeps_omitted_fields(
+        self, client, auth_headers, session_and_question
+    ):
         """A PATCH that only carries `concept` must not wipe the other fields."""
         card_id = self._create_card(client, auth_headers, session_and_question)
         before = client.get("/cards/", headers=auth_headers).get_json()[0]
         assert before["code"] and before["mnemonic"] and before["code_language"]
 
-        resp = client.patch(f"/cards/{card_id}", json={"concept": "x"}, headers=auth_headers)
+        resp = client.patch(
+            f"/cards/{card_id}", json={"concept": "x"}, headers=auth_headers
+        )
         assert resp.status_code == 200
 
         after = resp.get_json()
         assert after["concept"] == "x"
         for field in (
-            "code", "mnemonic", "code_language", "tags",
-            "definition", "explanation", "use_case", "avoid_when",
+            "code",
+            "mnemonic",
+            "code_language",
+            "tags",
+            "definition",
+            "explanation",
+            "use_case",
+            "avoid_when",
         ):
             assert after[field] == before[field], field
 
-    @pytest.mark.parametrize("payload, field", [
-        ({"code": ""}, "code"),
-        ({"code": None}, "code"),
-        ({"mnemonic": ""}, "mnemonic"),
-        ({"mnemonic": None}, "mnemonic"),
-    ])
+    @pytest.mark.parametrize(
+        "payload, field",
+        [
+            ({"code": ""}, "code"),
+            ({"code": None}, "code"),
+            ({"mnemonic": ""}, "mnemonic"),
+            ({"mnemonic": None}, "mnemonic"),
+        ],
+    )
     def test_explicit_empty_or_null_clears_optional_field(
         self, client, auth_headers, session_and_question, payload, field
     ):
@@ -345,9 +421,13 @@ class TestUpdateCard:
         assert body["code"] == "a\nb"
         assert body["code_language"] == "python"
 
-    def test_patch_empty_code_language_is_ignored(self, client, auth_headers, session_and_question):
+    def test_patch_empty_code_language_is_ignored(
+        self, client, auth_headers, session_and_question
+    ):
         card_id = self._create_card(client, auth_headers, session_and_question)
-        resp = client.patch(f"/cards/{card_id}", json={"code_language": ""}, headers=auth_headers)
+        resp = client.patch(
+            f"/cards/{card_id}", json={"code_language": ""}, headers=auth_headers
+        )
         assert resp.status_code == 200
         assert resp.get_json()["code_language"] == "javascript"
 
@@ -357,7 +437,9 @@ class TestUpdateCard:
     ):
         card_id = self._create_card(client, auth_headers, session_and_question)
         before = client.get("/cards/", headers=auth_headers).get_json()[0]
-        resp = client.patch(f"/cards/{card_id}", json={field: "x" * (cap + 1)}, headers=auth_headers)
+        resp = client.patch(
+            f"/cards/{card_id}", json={field: "x" * (cap + 1)}, headers=auth_headers
+        )
         assert resp.status_code == 400
         assert field in resp.get_json()["msg"]
         assert client.get("/cards/", headers=auth_headers).get_json()[0] == before
@@ -367,7 +449,9 @@ class TestUpdateCard:
         self, client, auth_headers, session_and_question, field, cap
     ):
         card_id = self._create_card(client, auth_headers, session_and_question)
-        resp = client.patch(f"/cards/{card_id}", json={field: "x" * cap}, headers=auth_headers)
+        resp = client.patch(
+            f"/cards/{card_id}", json={field: "x" * cap}, headers=auth_headers
+        )
         assert resp.status_code == 200
         assert resp.get_json()[field] == "x" * cap
 
@@ -377,13 +461,21 @@ class TestUpdateCard:
         self, client, auth_headers, session_and_question, field, value
     ):
         card_id = self._create_card(client, auth_headers, session_and_question)
-        resp = client.patch(f"/cards/{card_id}", json={field: value}, headers=auth_headers)
+        resp = client.patch(
+            f"/cards/{card_id}", json={field: value}, headers=auth_headers
+        )
         assert resp.status_code == 400
 
-    def test_patch_ten_tags_of_40_characters_are_accepted(self, client, auth_headers, session_and_question):
+    def test_patch_ten_tags_of_40_characters_are_accepted(
+        self, client, auth_headers, session_and_question
+    ):
         card_id = self._create_card(client, auth_headers, session_and_question)
         tags = [str(i) * 40 for i in range(10)]
-        resp = client.patch(f"/cards/{card_id}", json={"tags": [t[:40] for t in tags]}, headers=auth_headers)
+        resp = client.patch(
+            f"/cards/{card_id}",
+            json={"tags": [t[:40] for t in tags]},
+            headers=auth_headers,
+        )
         assert resp.status_code == 200
         assert resp.get_json()["tags"] == [t[:40] for t in tags]
 
@@ -404,23 +496,36 @@ class TestUpdateCard:
         self, client, auth_headers, session_and_question, tags
     ):
         card_id = self._create_card(client, auth_headers, session_and_question)
-        resp = client.patch(f"/cards/{card_id}", json={"tags": tags}, headers=auth_headers)
+        resp = client.patch(
+            f"/cards/{card_id}", json={"tags": tags}, headers=auth_headers
+        )
         assert resp.status_code == 400
-        assert client.get("/cards/", headers=auth_headers).get_json()[0]["tags"] == ["javascript", "closures"]
+        assert client.get("/cards/", headers=auth_headers).get_json()[0]["tags"] == [
+            "javascript",
+            "closures",
+        ]
 
-    def test_patch_null_tags_clears_them(self, client, auth_headers, session_and_question):
+    def test_patch_null_tags_clears_them(
+        self, client, auth_headers, session_and_question
+    ):
         card_id = self._create_card(client, auth_headers, session_and_question)
-        resp = client.patch(f"/cards/{card_id}", json={"tags": None}, headers=auth_headers)
+        resp = client.patch(
+            f"/cards/{card_id}", json={"tags": None}, headers=auth_headers
+        )
         assert resp.status_code == 200
         assert resp.get_json()["tags"] == []
 
-    def test_patch_non_object_body_returns_400(self, client, auth_headers, session_and_question):
+    def test_patch_non_object_body_returns_400(
+        self, client, auth_headers, session_and_question
+    ):
         card_id = self._create_card(client, auth_headers, session_and_question)
         resp = client.patch(f"/cards/{card_id}", data="[1]", headers=auth_headers)
         assert resp.status_code == 400
 
     def test_update_nonexistent_card_returns_404(self, client, auth_headers):
-        resp = client.patch("/cards/999999", json={"concept": "x"}, headers=auth_headers)
+        resp = client.patch(
+            "/cards/999999", json={"concept": "x"}, headers=auth_headers
+        )
         assert resp.status_code == 404
 
     def test_update_card_of_another_user_returns_404(
@@ -430,13 +535,17 @@ class TestUpdateCard:
         404 (not 403) so it doesn't confirm whether the other user's card
         exists -- documented as a design decision, not a bug."""
         card_id = self._create_card(client, auth_headers, session_and_question)
-        resp = client.patch(f"/cards/{card_id}", json={"concept": "Hacked"}, headers=second_user_headers)
+        resp = client.patch(
+            f"/cards/{card_id}", json={"concept": "Hacked"}, headers=second_user_headers
+        )
         assert resp.status_code == 404
 
         untouched = Card.query.filter_by(card_id=card_id).first()
         assert untouched.concept != "Hacked"
 
-    def test_update_card_requires_auth(self, client, auth_headers, session_and_question):
+    def test_update_card_requires_auth(
+        self, client, auth_headers, session_and_question
+    ):
         card_id = self._create_card(client, auth_headers, session_and_question)
         resp = client.patch(f"/cards/{card_id}", json={"concept": "x"})
         assert resp.status_code == 401
@@ -445,6 +554,7 @@ class TestUpdateCard:
 # ---------------------------------------------------------------------------
 # DELETE /cards/<id>
 # ---------------------------------------------------------------------------
+
 
 class TestDeleteCard:
     def _create_card(self, client, auth_headers, session_and_question):
@@ -470,7 +580,9 @@ class TestDeleteCard:
         assert resp.status_code == 404
         assert Card.query.filter_by(card_id=card_id).first() is not None
 
-    def test_delete_card_requires_auth(self, client, auth_headers, session_and_question):
+    def test_delete_card_requires_auth(
+        self, client, auth_headers, session_and_question
+    ):
         card_id = self._create_card(client, auth_headers, session_and_question)
         resp = client.delete(f"/cards/{card_id}")
         assert resp.status_code == 401
