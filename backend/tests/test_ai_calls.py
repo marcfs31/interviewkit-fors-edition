@@ -24,7 +24,7 @@ from app.services.ai_service import (
 )
 
 GOOD_QUESTIONS = {"theory": ["T1", "T2"], "code": ["C1", "C2", "C3"]}
-GOOD_FEEDBACK = {"result": "CORRECT", "feedback": "Bien.", "card": {}}
+GOOD_FEEDBACK = {"result": "CORRECT", "feedback": "Bien.", "card": {"concept": "Closures"}}
 
 
 def _completion(content, usage=True):
@@ -160,6 +160,24 @@ class TestRecordedRows:
 
         assert _rows()[0].status == "unreadable_json"
 
+    @pytest.mark.parametrize("payload", [
+        {"result": None, "feedback": "Bien.", "card": {"concept": "C"}},
+        {"result": "MAYBE", "feedback": "Bien.", "card": {"concept": "C"}},
+        {"result": "CORRECT", "feedback": "", "card": {"concept": "C"}},
+        {"result": "CORRECT", "feedback": "Bien.", "card": {"concept": ""}},
+        {},
+    ], ids=repr)
+    def test_object_with_unusable_content_is_marked_unusable_output(self, db, monkeypatch, payload):
+        _stub_create(monkeypatch, lambda **kw: _completion(json.dumps(payload)))
+
+        with pytest.raises(AIUnavailableError) as exc_info:
+            generate_feedback("Python", "Q?", "A")
+
+        assert exc_info.value.status == 502
+        (row,) = _rows()
+        assert row.status == "unusable_output"
+        assert row.total_tokens == 33  # the HTTP call did go fine
+
 
 class TestQuestionAttempts:
     def test_each_retry_gets_its_own_row_with_its_attempt_number(self, db, monkeypatch):
@@ -192,8 +210,19 @@ class TestQuestionAttempts:
 
         assert {r.status for r in _rows()} == {"unreadable_json"}
 
-    def test_incomplete_but_readable_output_stays_ok(self, db, monkeypatch):
+    def test_incomplete_but_readable_output_is_marked_unusable_output(self, db, monkeypatch):
         _stub_create(monkeypatch, lambda **kw: _completion(json.dumps({"theory": ["T1"], "code": []})))
+
+        with pytest.raises(AIUnavailableError) as exc_info:
+            generate_questions("Python", "Básico", None)
+
+        assert exc_info.value.status == 502
+        rows = _rows()
+        assert [r.attempt for r in rows] == list(range(1, MAX_QUESTION_ATTEMPTS + 1))
+        assert {r.status for r in rows} == {"unusable_output"}
+
+    def test_complete_output_stays_ok(self, db, monkeypatch):
+        _stub_create(monkeypatch, lambda **kw: _completion(json.dumps(GOOD_QUESTIONS)))
 
         generate_questions("Python", "Básico", None)
 
@@ -268,7 +297,8 @@ class TestPrivacy:
         _stub_create(monkeypatch, lambda **kw: _completion(next(outputs)))
 
         generate_feedback("Python", question, answer)
-        generate_questions("Python", "Básico", "async")
+        with pytest.raises(AIUnavailableError):
+            generate_questions("Python", "Básico", "async")
 
         rows = _rows()
         assert rows
