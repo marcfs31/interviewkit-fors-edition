@@ -113,9 +113,15 @@ export default function CodeEditor({
 }: CodeEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  // The view is created once; the listener must read the latest handler, not the first render's.
+  const onChangeRef = useRef(onChange);
   const languageCompartment = useRef(new Compartment());
   const defaultLanguage = languageForStack(stack);
   const [language, setLanguage] = useState(findLanguage(defaultLanguage).id);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
 
   useEffect(() => {
     if (!editorRef.current || viewRef.current) return;
@@ -123,7 +129,7 @@ export default function CodeEditor({
     const updateListener = EditorView.updateListener.of((update) => {
       if (update.docChanged) {
         const content = update.state.doc.toString();
-        onChange(content);
+        onChangeRef.current(content);
       }
     });
 
