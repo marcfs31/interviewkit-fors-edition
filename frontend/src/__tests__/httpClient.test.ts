@@ -142,7 +142,7 @@ describe("AI endpoints use the longer timeout", () => {
 });
 
 describe("getStacks", () => {
-  it("goes through apiFetch, so it sends credentials", async () => {
+  it("goes through apiFetch, which never sends cookies", async () => {
     const fetchMock = vi.fn().mockResolvedValue(okJson({ rol: {}, level: [], topic: {} }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -150,7 +150,7 @@ describe("getStacks", () => {
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toContain("/stacks/");
-    expect(init.credentials).toBe("include");
+    expect(init.credentials).toBeUndefined();
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 });

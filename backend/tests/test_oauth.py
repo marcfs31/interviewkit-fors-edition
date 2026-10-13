@@ -104,7 +104,7 @@ class TestGetOrCreateUser:
 
 
 class TestBuildLoginResponse:
-    def test_sets_jwt_cookie(self, app, db):
+    def test_sets_no_auth_cookie(self, app, db):
         with app.app_context():
             user = User(name="Test", email="test@example.com")
             db.session.add(user)
@@ -112,7 +112,7 @@ class TestBuildLoginResponse:
 
             resp = _build_login_response(user)
             assert resp.status_code == 302
-            assert "access_token_cookie" in resp.headers.get("Set-Cookie", "")
+            assert "access_token_cookie" not in resp.headers.get("Set-Cookie", "")
 
     def test_redirect_carries_exchange_code_not_the_jwt(self, app, db):
         """The redirect URL must never contain the JWT itself (browser history,
@@ -126,9 +126,8 @@ class TestBuildLoginResponse:
             resp = _build_login_response(user)
             assert resp.location.startswith("http://localhost:3000/auth/callback#code=")
             assert "access_token" not in resp.location
-            cookie = resp.headers.get("Set-Cookie", "")
-            jwt_value = cookie.split("access_token_cookie=")[1].split(";")[0]
-            assert jwt_value not in resp.location
+            # Every PyJWT token starts with the base64 of '{"alg"'.
+            assert "eyJhbGci" not in resp.location
 
 
 def _code_from(resp):
@@ -136,11 +135,8 @@ def _code_from(resp):
 
 
 class TestOAuthExchange:
-    """Browsers that block third-party cookies (Safari/iOS, Brave, Firefox
-    strict, Chrome incognito) never send the API-domain cookie from the
-    frontend domain, so OAuth login ended on /login?error=oauth_failed while
-    email login (token in localStorage + Authorization header) worked. The
-    frontend now trades the redirect's code for a token it can store."""
+    """The API only accepts the Authorization header, so the frontend trades
+    the redirect's code for a token it keeps in localStorage."""
 
     def _make_user(self, db):
         user = User(name="Exchange User", email="exchange@example.com")
@@ -159,9 +155,8 @@ class TestOAuthExchange:
         assert body["name"] == "Exchange User"
         assert body["token"]
 
-        # The token must authenticate API calls through the Authorization
-        # header alone (no cookie), which is how the frontend sends it.
-        client.delete_cookie("access_token_cookie")
+        assert resp.headers.get("Set-Cookie") is None
+
         profile = client.get("/me/profile", headers={"Authorization": f"Bearer {body['token']}"})
         assert profile.status_code == 200
         assert profile.get_json()["email"] == "exchange@example.com"
@@ -195,11 +190,11 @@ class TestOAuthExchange:
     def test_a_jwt_cannot_be_used_as_an_exchange_code(self, app, client, db):
         """The code is signed with a dedicated salt, so an access token (or
         any other signed value) is not accepted in its place."""
+        from flask_jwt_extended import create_access_token
+
         with app.app_context():
             user = self._make_user(db)
-            resp = _build_login_response(user)
-            cookie = resp.headers.get("Set-Cookie", "")
-            jwt_value = cookie.split("access_token_cookie=")[1].split(";")[0]
+            jwt_value = create_access_token(identity=str(user.user_id))
 
         assert client.post("/auth/oauth/exchange", json={"code": jwt_value}).status_code == 401
 
@@ -273,7 +268,7 @@ class TestGoogleCallback:
             assert resp.status_code == 302
             assert "error=oauth_failed" in resp.location
 
-    def test_successful_full_flow_creates_user_and_link_and_sets_cookie(self, client, db):
+    def test_successful_full_flow_creates_user_and_link_and_redirects_to_the_callback(self, client, db):
         mock_token = {
             "userinfo": {"sub": "google_user_1", "email": "googleuser@example.com", "name": "Google User"}
         }
@@ -283,7 +278,7 @@ class TestGoogleCallback:
             resp = client.get("/auth/google/callback")
             assert resp.status_code == 302
             assert "/auth/callback" in resp.location
-            assert "access_token_cookie" in resp.headers.get("Set-Cookie", "")
+            assert "access_token_cookie" not in resp.headers.get("Set-Cookie", "")
 
         with client.application.app_context():
             user = User.query.filter_by(email="googleuser@example.com").first()
@@ -380,7 +375,7 @@ class TestGitHubCallback:
             resp = client.get("/auth/github/callback")
             assert resp.status_code == 302
             assert "/auth/callback" in resp.location
-            assert "access_token_cookie" in resp.headers.get("Set-Cookie", "")
+            assert "access_token_cookie" not in resp.headers.get("Set-Cookie", "")
 
         with client.application.app_context():
             user = User.query.filter_by(email="github@example.com").first()

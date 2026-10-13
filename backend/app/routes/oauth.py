@@ -1,5 +1,5 @@
 from flask import Blueprint, redirect, url_for, current_app, request, jsonify
-from flask_jwt_extended import create_access_token, set_access_cookies
+from flask_jwt_extended import create_access_token
 from authlib.integrations.flask_client import OAuth
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from sqlalchemy.exc import IntegrityError
@@ -14,12 +14,9 @@ oauth = OAuth()
 
 # After a successful provider login the browser is redirected to the frontend
 # with a short-lived exchange code. The frontend trades it for an access token
-# it can keep in localStorage, exactly like an email/password login.
-#
-# Why not rely on the httpOnly cookie alone: the API lives on another site than
-# the frontend, so browsers that block third-party cookies (Safari/iOS, Brave,
-# Firefox strict, Chrome incognito) never send that cookie back and the OAuth
-# login ended on /login?error=oauth_failed.
+# it can keep in localStorage, exactly like an email/password login. The API
+# lives on another site than the frontend and only accepts the Authorization
+# header, so no auth cookie is ever set.
 OAUTH_CODE_MAX_AGE_SECONDS = 60
 _OAUTH_CODE_SALT = "oauth-login-exchange"
 
@@ -88,18 +85,11 @@ def _get_or_create_user(provider, provider_user_id, email, name):
 
 
 def _build_login_response(user):
-    expires_delta = current_app.config["JWT_ACCESS_TOKEN_EXPIRES"]
-    access_token = create_access_token(
-        identity=str(user.user_id), expires_delta=expires_delta
-    )
     frontend_url = current_app.config["FRONTEND_URL"]
     # The code goes in the URL fragment: browsers never send fragments to a
     # server, so it stays out of access logs and Referer headers.
     code = _code_serializer().dumps({"uid": user.user_id})
-    response = redirect(f"{frontend_url}/auth/callback#code={code}")
-    # Kept for browsers that do accept the cookie.
-    set_access_cookies(response, access_token)
-    return response
+    return redirect(f"{frontend_url}/auth/callback#code={code}")
 
 
 @oauth_bp.route("/oauth/exchange", methods=["POST"])
@@ -122,7 +112,6 @@ def exchange_code():
     expires_delta = current_app.config["JWT_ACCESS_TOKEN_EXPIRES"]
     access_token = create_access_token(identity=str(user.user_id), expires_delta=expires_delta)
     response = jsonify({"user_id": user.user_id, "name": user.name, "token": access_token})
-    set_access_cookies(response, access_token)
     return response, 200
 
 

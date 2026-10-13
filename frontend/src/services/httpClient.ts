@@ -99,7 +99,6 @@ export async function apiFetch(
   try {
     return await fetch(`${API_URL}${url}`, {
       ...rest,
-      credentials: "include",
       signal: combinedSignal,
       headers: {
         ...headers(),

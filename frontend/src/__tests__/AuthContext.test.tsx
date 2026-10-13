@@ -164,7 +164,7 @@ describe('AuthContext', () => {
     expect(mockLogoutUser).toHaveBeenCalled();
   });
 
-  it('loginFromOAuth() fetches profile and saves user (JWT lives in an httpOnly cookie, not localStorage)', async () => {
+  it('loginFromOAuth() fetches profile and saves user', async () => {
     renderWithProvider();
 
     await waitFor(() => {
@@ -348,9 +348,9 @@ describe('AuthContext', () => {
     expect(screen.getByTestId('stats-level').textContent).toBe('none');
   });
 
-  it('restores session via profile fetch when user exists without token (OAuth cookie flow)', async () => {
+  it('treats a stored user without a token as logged out (no cookie session any more)', async () => {
     window.localStorage.setItem('user', 'StaleUser');
-    // no access_token: the session lives in the httpOnly cookie, confirmed via profile
+    // no access_token: the API only accepts the Authorization header
 
     renderWithProvider();
 
@@ -358,54 +358,9 @@ describe('AuthContext', () => {
       expect(screen.getByTestId('initialized').textContent).toBe('true');
     });
 
-    expect(mockGetMyProfile).toHaveBeenCalled();
-    expect(window.localStorage.getItem('user')).toBe('OAuthUser');
-    expect(screen.getByTestId('user').textContent).toBe('OAuthUser');
-  });
-
-  it('clears stale user in localStorage when the profile fetch fails (no valid cookie)', async () => {
-    window.localStorage.setItem('user', 'StaleUser');
-    mockGetMyProfile.mockRejectedValue(new Error('unauthorized'));
-
-    renderWithProvider();
-
-    await waitFor(() => {
-      expect(screen.getByTestId('initialized').textContent).toBe('true');
-    });
-
+    expect(mockGetMyProfile).not.toHaveBeenCalled();
+    expect(mockGetMyStats).not.toHaveBeenCalled();
     expect(window.localStorage.getItem('user')).toBeNull();
     expect(screen.getByTestId('user').textContent).toBe('null');
-    expect(mockGetMyStats).not.toHaveBeenCalled();
-  });
-
-  it('keeps the restored user when a 401 fires while the mount-time profile check is in progress', async () => {
-    // Restore a session without a token (OAuth cookie flow): while
-    // getMyProfile is pending, loggingInRef.current stays true.
-    let resolveProfile: (value: { name: string; email: string }) => void;
-    mockGetMyProfile.mockReturnValue(new Promise((resolve) => { resolveProfile = resolve; }));
-    window.localStorage.setItem('user', 'PreviousUser');
-
-    renderWithProvider();
-
-    // Simulate an external 401 (e.g. a parallel request that fails)
-    // while loggingInRef is still true.
-    await waitFor(() => {
-      expect(mockSetOnUnauthorized).toHaveBeenCalled();
-    });
-    const cb = mockSetOnUnauthorized.mock.calls[0][0];
-    act(() => { cb(); });
-
-    // The callback must be suppressed: the previous user is not cleared.
-    expect(window.localStorage.getItem('user')).toBe('PreviousUser');
-
-    // Now let the profile check finish.
-    await act(async () => {
-      resolveProfile({ name: 'OAuthUser', email: 'oauth@test.com' });
-    });
-
-    await waitFor(() => {
-      expect(screen.getByTestId('initialized').textContent).toBe('true');
-    });
-    expect(window.localStorage.getItem('user')).toBe('OAuthUser');
   });
 });

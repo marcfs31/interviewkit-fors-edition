@@ -80,23 +80,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(savedUser);
         refreshStats();
         setInitialized(true);
-      } else if (savedUser && !savedToken) {
-        // Login OAuth previo: no hay access_token en localStorage (vive en
-        // la cookie httpOnly), asi que confirmamos la sesion via el perfil.
-        loggingInRef.current = true;
-        try {
-          const profile = await getMyProfile();
-          const name = profile.name || profile.email || "User";
-          localStorage.setItem("user", name);
-          setUser(name);
-          refreshStats();
-        } catch {
-          localStorage.removeItem("user");
-        } finally {
-          loggingInRef.current = false;
-          setInitialized(true);
-        }
       } else {
+        // La API solo acepta el JWT por cabecera: sin token no hay sesion,
+        // y un usuario guardado sin token es un resto de una sesion antigua.
+        if (savedUser) localStorage.removeItem("user");
         setInitialized(true);
       }
     };
@@ -114,8 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function loginFromOAuth() {
-    // El JWT llega en una cookie httpOnly (set_access_cookies en el backend);
-    // aqui solo confirmamos la identidad via el perfil, sin token en localStorage.
+    // Sin token en localStorage el perfil responde 401 y el llamador vuelve al login.
     loggingInRef.current = true;
     try {
       const profile = await getMyProfile();

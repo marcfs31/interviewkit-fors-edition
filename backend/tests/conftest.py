@@ -27,11 +27,6 @@ def app():
     app.config.update({
         "TESTING": True,
         "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
-        "JWT_COOKIE_SECURE": False,
-        "JWT_COOKIE_CSRF_PROTECT": False,
-        "JWT_TOKEN_LOCATION": ["cookies", "headers"],
-        "JWT_ACCESS_COOKIE_PATH": "/",
-        "JWT_COOKIE_SAMESITE": "Lax",
     })
     return app
 
@@ -127,11 +122,3 @@ def registered_user(client, db):
     resp = client.post("/auth/register", json=payload)
     assert resp.status_code == 201
     return payload
-
-
-@pytest.fixture(scope="function")
-def logged_in_client(client, registered_user):
-    payload = {"email": registered_user["email"], "password": registered_user["password"]}
-    resp = client.post("/auth/login", json=payload)
-    assert resp.status_code == 200
-    return client

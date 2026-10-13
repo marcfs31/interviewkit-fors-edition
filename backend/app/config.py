@@ -92,20 +92,17 @@ class Config:
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    # JWT via httpOnly cookies and Authorization headers (for cross-origin OAuth)
-    JWT_TOKEN_LOCATION = ["cookies", "headers"]
+    # Header only: a cookie is sent by the browser on cross-site requests on
+    # its own, so accepting the JWT from one would make every route CSRF-able.
+    JWT_TOKEN_LOCATION = ["headers"]
     JWT_HEADER_NAME = "Authorization"
     JWT_HEADER_TYPE = "Bearer"
-    JWT_COOKIE_SECURE = _SETTINGS["COOKIE_SECURE"]
-    JWT_COOKIE_CSRF_PROTECT = False
-    JWT_ACCESS_COOKIE_PATH = "/"
-    JWT_COOKIE_SAMESITE = _SETTINGS["COOKIE_SAMESITE"]
 
     # Flask's session cookie (used by Authlib to store the OAuth handshake's
-    # state/nonce). Like the JWT, this is cross-site in production (frontend
-    # on Vercel, backend on Fly.io), so it needs explicit SameSite=None +
-    # Secure; Flask's defaults aren't enough and cause the state to get lost
-    # on the redirect back from Google/GitHub.
+    # state/nonce). This is cross-site in production (frontend on Vercel,
+    # backend on Fly.io), so it needs explicit SameSite=None + Secure; Flask's
+    # defaults aren't enough and cause the state to get lost on the redirect
+    # back from Google/GitHub.
     SESSION_COOKIE_SAMESITE = _SETTINGS["COOKIE_SAMESITE"]
     SESSION_COOKIE_SECURE = _SETTINGS["COOKIE_SECURE"]
 
