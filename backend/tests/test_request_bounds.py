@@ -37,7 +37,7 @@ class TestBodySizeLimit:
 
 class TestJsonBodyShape:
     @pytest.mark.parametrize("body", ["[1, 2]", '"text"', "42", "null", "true", "[]"])
-    @pytest.mark.parametrize("url", ["/auth/register", "/auth/login", "/oauth/exchange"])
+    @pytest.mark.parametrize("url", ["/auth/register", "/auth/login", "/auth/oauth/exchange"])
     def test_non_object_json_body_returns_json_400(self, client, url, body):
         resp = client.post(url, data=body, content_type="application/json")
         assert resp.status_code == 400
@@ -85,3 +85,14 @@ class TestJsonBodyShape:
     def test_get_with_json_content_type_is_unaffected(self, client):
         resp = client.get("/stacks/", data="[1]", content_type="application/json")
         assert resp.status_code == 200
+
+
+class TestCardIdsMustBeIntegers:
+    """A non-scalar id used to reach the DB driver and surface as a 500."""
+
+    @pytest.mark.parametrize("field", ["session_id", "question_id"])
+    @pytest.mark.parametrize("value", [[1], {"a": 1}, "1", True, None])
+    def test_create_card_with_a_non_integer_id_returns_400(self, client, auth_headers, field, value):
+        payload = {"session_id": 1, "question_id": 1, "concept": "c", field: value}
+        resp = client.post("/cards/", json=payload, headers=auth_headers)
+        assert resp.status_code == 400
