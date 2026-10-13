@@ -32,6 +32,19 @@ db = SQLAlchemy()
 jwt = JWTManager()
 limiter = Limiter(key_func=_rate_limit_key)
 
+logger = logging.getLogger(__name__)
+
+
+def _warn_if_limits_are_per_process(app):
+    """With memory:// every gunicorn worker (and every machine) counts on its
+    own and a restart zeroes the counters, so the real limits are looser than
+    the declared ones. Only worth saying in production."""
+    if app.config.get("FLASK_ENV") == "production" and app.config["RATELIMIT_STORAGE_URI"].startswith("memory://"):
+        logger.warning(
+            "RATELIMIT_STORAGE_URI is not set: rate limits are per process and reset "
+            "when the machine stops. Set a shared storage (e.g. redis://...) to enforce them globally."
+        )
+
 
 def _configure_logging():
     """Gunicorn doesn't configure the root logger, so without this every
@@ -82,6 +95,7 @@ def create_app():
     # if they need to start from a clean state.
     app.config.setdefault("RATELIMIT_ENABLED", True)
     limiter.init_app(app)
+    _warn_if_limits_are_per_process(app)
 
     @app.errorhandler(429)
     def _rate_limit_exceeded(e):

@@ -8,7 +8,6 @@ the real Groq API. Rate limiting is real (flask-limiter, in-memory storage)
 and reset before/after every test so tests don't bleed into each other.
 """
 import pytest
-from app import limiter
 from app.services.ai_service import AIUnavailableError
 
 
@@ -38,17 +37,6 @@ def _mock_ai(monkeypatch):
         "app.routes.sessions.generate_feedback",
         lambda stack, question, answer, question_type="code": dict(FAKE_FEEDBACK),
     )
-
-
-@pytest.fixture(autouse=True)
-def _reset_rate_limits():
-    """Each test gets a fresh `db` fixture (so user ids are reused across
-    tests), but the limiter's in-memory storage persists for the whole
-    pytest session. Without this reset, an earlier test's counters would
-    leak into the next one via the recycled user_id."""
-    limiter.reset()
-    yield
-    limiter.reset()
 
 
 def _create_session(client, headers, payload=None):

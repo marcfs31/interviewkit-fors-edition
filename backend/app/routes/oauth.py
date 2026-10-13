@@ -5,7 +5,8 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from sqlalchemy.exc import IntegrityError
 from ..models.user import User
 from ..models.oauth_account import OAuthAccount
-from .. import db
+from .. import db, limiter
+from flask_limiter.util import get_remote_address
 
 oauth_bp = Blueprint("oauth", __name__, url_prefix="/auth")
 
@@ -102,6 +103,7 @@ def _build_login_response(user):
 
 
 @oauth_bp.route("/oauth/exchange", methods=["POST"])
+@limiter.limit("20 per minute", key_func=get_remote_address)
 def exchange_code():
     data = request.get_json(silent=True) or {}
     code = data.get("code")

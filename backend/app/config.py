@@ -12,6 +12,12 @@ def _get_database_url():
     return url
 
 
+def _get_ratelimit_storage_uri():
+    """Where Flask-Limiter keeps its counters. Unset or blank keeps the
+    per-process memory:// storage (a shared one needs e.g. a redis:// URI)."""
+    return (os.getenv("RATELIMIT_STORAGE_URI") or "").strip() or "memory://"
+
+
 class Config:
     SQLALCHEMY_DATABASE_URI = _get_database_url()
     # pool_pre_ping: check each pooled connection with a lightweight ping
@@ -53,6 +59,8 @@ class Config:
     # on the redirect back from Google/GitHub.
     SESSION_COOKIE_SAMESITE = "None" if os.getenv("FLASK_ENV") == "production" else "Lax"
     SESSION_COOKIE_SECURE = os.getenv("FLASK_ENV") == "production"
+
+    RATELIMIT_STORAGE_URI = _get_ratelimit_storage_uri()
 
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
