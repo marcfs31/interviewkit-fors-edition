@@ -294,6 +294,27 @@ class TestCompleteSession:
         resp = client.post(f"/sessions/{session_id}/complete")
         assert resp.status_code == 401
 
+    def test_cross_site_style_post_with_only_the_cookie_cannot_complete_a_session(
+        self, app, client, auth_headers
+    ):
+        """A form POST from another site carries the victim's cookies but
+        cannot set an Authorization header, so it must not complete (an
+        irreversible action) the victim's session."""
+        from flask_jwt_extended import create_access_token
+        from app import db as _db
+        from app.models.session import Session
+
+        session_id, _ = self._create_and_answer_all(client, auth_headers)
+        with app.app_context():
+            token = create_access_token(identity=str(auth_headers["user_id"]))
+
+        client.set_cookie("access_token_cookie", token)
+        resp = client.post(f"/sessions/{session_id}/complete")
+
+        assert resp.status_code == 401
+        with app.app_context():
+            assert _db.session.get(Session, session_id).is_completed is False
+
 
 class TestRateLimiting:
     """The Groq free tier budget is shared across the whole app (see

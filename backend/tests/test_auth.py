@@ -2,7 +2,7 @@
 Tests for app/routes/auth.py: POST /auth/register, POST /auth/login, POST /auth/logout.
 
 Covers input validation, password hashing behavior, duplicate-email
-handling, cookie-based JWT issuance on login, and the OAuth-only-user edge
+handling, header-only JWT authentication, and the OAuth-only-user edge
 case (a user created via Google/GitHub has password=None and must not be
 able to log in with a password).
 """
@@ -70,14 +70,14 @@ class TestRegister:
 
 
 class TestLogin:
-    def test_login_success_sets_jwt_cookie_and_returns_token(self, client, registered_user):
+    def test_login_success_returns_token_and_sets_no_cookie(self, client, registered_user):
         payload = {"email": registered_user["email"], "password": registered_user["password"]}
         resp = client.post("/auth/login", json=payload)
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["name"] == registered_user["name"]
         assert data["token"]
-        assert "access_token_cookie" in resp.headers.get("Set-Cookie", "")
+        assert resp.headers.get("Set-Cookie") is None
 
     def test_login_wrong_password_returns_400(self, client, registered_user):
         payload = {"email": registered_user["email"], "password": "wrongpassword1"}
@@ -125,9 +125,34 @@ class TestLogin:
 
 
 class TestLogout:
-    def test_logout_clears_access_cookie(self, client, db):
+    def test_logout_returns_200_and_touches_no_cookie(self, client, db):
         resp = client.post("/auth/logout")
         assert resp.status_code == 200
-        # unset_access_cookies expires the cookie by setting Max-Age=0 / a past Expires
-        set_cookie_header = resp.headers.get("Set-Cookie", "")
-        assert "access_token_cookie" in set_cookie_header
+        assert resp.headers.get("Set-Cookie") is None
+
+
+class TestJwtOnlyFromAuthorizationHeader:
+    """The access token is accepted from the Authorization header only. A
+    cookie is attached by the browser to cross-site requests on its own, so
+    honouring one would expose every protected route to CSRF."""
+
+    def _token(self, client, registered_user):
+        payload = {"email": registered_user["email"], "password": registered_user["password"]}
+        return client.post("/auth/login", json=payload).get_json()["token"]
+
+    def test_valid_token_in_the_header_authenticates(self, client, registered_user):
+        token = self._token(client, registered_user)
+        resp = client.get("/me/profile", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 200
+
+    def test_valid_token_in_the_access_cookie_is_ignored(self, client, registered_user):
+        token = self._token(client, registered_user)
+        client.set_cookie("access_token_cookie", token)
+        resp = client.get("/me/profile")
+        assert resp.status_code == 401
+
+    def test_cookie_is_ignored_even_when_the_header_is_malformed(self, client, registered_user):
+        token = self._token(client, registered_user)
+        client.set_cookie("access_token_cookie", token)
+        resp = client.get("/me/profile", headers={"Authorization": "Bearer not-a-jwt"})
+        assert resp.status_code in (401, 422)

@@ -5,7 +5,7 @@ from ..models.user import User
 import bcrypt
 from .. import db, limiter
 from flask_limiter.util import get_remote_address
-from flask_jwt_extended import create_access_token, set_access_cookies, unset_access_cookies
+from flask_jwt_extended import create_access_token
 
 
 EMAIL_REGEX = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
@@ -79,12 +79,10 @@ def login():
         "name": user.name,
         "token": access_token,
     })
-    set_access_cookies(response, access_token)
     return response, 200
 
 
 @auth.route('/logout', methods=['POST'])
 def logout():
-    response = jsonify({"msg": "Sesion cerrada correctamente"})
-    unset_access_cookies(response)
-    return response, 200
+    # Stateless: the client drops its token. Server-side revocation is not implemented.
+    return jsonify({"msg": "Sesion cerrada correctamente"}), 200

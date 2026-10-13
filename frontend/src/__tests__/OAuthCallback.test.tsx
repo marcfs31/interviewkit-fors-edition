@@ -72,7 +72,7 @@ describe('OAuth callback page', () => {
     expect(mockLogin).not.toHaveBeenCalled();
   });
 
-  it('falls back to the cookie session when there is no code', async () => {
+  it('falls back to loginFromOAuth when there is no code', async () => {
     mockLoginFromOAuth.mockResolvedValue(undefined);
 
     render(<OAuthCallbackPage />);
