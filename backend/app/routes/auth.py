@@ -3,6 +3,7 @@ import re
 from flask import Blueprint, request, jsonify, current_app
 from ..models.user import User
 import bcrypt
+from sqlalchemy import func
 from .. import db, limiter
 from flask_limiter.util import get_remote_address
 from flask_jwt_extended import create_access_token
@@ -22,7 +23,7 @@ def register():
         return jsonify({"error": "El cuerpo de la peticion debe ser JSON"}), 400
 
     name = (data.get("name") or "").strip()
-    email = (data.get("email") or "").strip()
+    email = (data.get("email") or "").strip().lower()
     password = data.get("password") or ""
 
     if not name or not email or not password:
@@ -34,7 +35,7 @@ def register():
     if len(password) < MIN_PASSWORD_LENGTH:
         return jsonify({"error": f"La contrasena debe tener al menos {MIN_PASSWORD_LENGTH} caracteres"}), 400
 
-    if User.query.filter_by(email=email).first() is not None:
+    if User.query.filter(func.lower(User.email) == email).first() is not None:
         return jsonify({"error": "Este email ya esta registrado"}), 409
 
     hashedPassword = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(12)).decode("utf-8")
@@ -52,13 +53,13 @@ def login():
     if data is None:
         return jsonify({"error": "El cuerpo de la peticion debe ser JSON"}), 400
 
-    email = data.get("email") or ""
+    email = (data.get("email") or "").strip().lower()
     password = data.get("password") or ""
 
     if not email or not password:
         return jsonify({"error": "Los campos no pueden estar vacios"}), 400
 
-    user = User.query.filter_by(email=email).first()
+    user = User.query.filter(func.lower(User.email) == email).first()
 
     if user is None:
         return jsonify({"error": "Credenciales incorrectas"}), 400
