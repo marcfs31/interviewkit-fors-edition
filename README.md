@@ -171,6 +171,8 @@ The database container started in the setup step keeps running in the background
 | `FRONTEND_URL` | Yes | Where OAuth callbacks redirect the user. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | For Google login | OAuth credentials. |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | For GitHub login | OAuth credentials. |
+| `LOG_LEVEL` | No | Log level: `DEBUG`, `INFO`, `WARNING` or `ERROR`. Defaults to `INFO`; an unknown value also falls back to `INFO`. |
+| `SENTRY_DSN` | No | Enables Sentry error reporting. Without it Sentry is not initialised. Events carry no PII and no request bodies. |
 
 **`frontend/.env`**
 
@@ -184,7 +186,7 @@ The database container started in the setup step keeps running in the background
 
 ## API overview
 
-All endpoints except `/auth/*`, `/stacks` and the OAuth flow require a valid session cookie.
+All endpoints except `/auth/*`, `/stacks`, `/health` and the OAuth flow require a valid session cookie.
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -201,6 +203,7 @@ All endpoints except `/auth/*`, `/stacks` and the OAuth flow require a valid ses
 | `PATCH` / `DELETE` | `/cards/<id>` | Edit or delete a card |
 | `GET` | `/me/stats` | Aggregated statistics, XP and level |
 | `GET` / `PATCH` | `/me/profile` | Read or update your profile |
+| `GET` | `/health` | Liveness and database check with the deployed `version` (public, not rate limited; 503 when the database is unreachable) |
 | `GET` | `/debug/db` | Database diagnostics (non-production only) |
 
 **Rate limits** (AI endpoints): 5 session creations per hour and 15 answer evaluations per hour per user, plus a global shared limit of 20 per minute and 40 per day to protect the Groq free-tier budget.
@@ -226,9 +229,9 @@ npm test                         # single run
 npm run test:watch               # watch mode
 ```
 
-The backend has tests for authentication, OAuth, models, sessions, cards, user stats and the AI service (with the Groq client mocked). The frontend has tests for the authentication context.
+The backend has tests for authentication, OAuth, models, sessions, cards, user stats and the AI service (with the Groq client mocked). The frontend has 4 test files: the authentication context, the OAuth callback, the session reducer and inline text rendering.
 
-**Continuous integration**: [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and pull request, with the backend and frontend jobs in parallel (Python 3.12 and Node 22, with dependency caching). Backend: `ruff` lint + `pytest` with coverage (minimum 85%, reported to Codecov). Frontend: `tsc` type-check + `next lint` + `vitest`. No secrets are required.
+**Continuous integration**: [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and pull request, with the backend and frontend jobs in parallel (Python 3.12 and Node 22, with dependency caching). Backend: `ruff` lint + `pytest` with coverage (minimum 85%, reported to Codecov). Frontend: `tsc` type-check + `next lint` + `vitest`. No secrets are required to pass the checks; the coverage upload uses the optional `CODECOV_TOKEN` repository secret and is skipped without it.
 
 ---
 
@@ -239,8 +242,8 @@ interviewkit/
 ├── .github/workflows/ci.yml           # CI: pytest + npm test
 ├── backend/
 │   ├── app/
-│   │   ├── models/                    # User, Session, Question, Card, OAuthAccount
-│   │   ├── routes/                    # auth, oauth, sessions, cards, user, stacks, debug
+│   │   ├── models/                    # User, Session, Question, Card, OAuthAccount, AICall
+│   │   ├── routes/                    # auth, oauth, sessions, cards, user, stacks, health, debug
 │   │   ├── services/                  # Business logic and Groq integration
 │   │   ├── constants/                 # Gamification rules and stacks
 │   │   ├── __init__.py                # App factory, rate limiter, OAuth init
@@ -343,7 +346,7 @@ The quality of the generated questions depends entirely on the prompt. Early ver
 - [ ] Spaced-repetition review mode for study cards
 - [ ] Export cards (Markdown / Anki)
 - [ ] End-to-end tests (Playwright) and broader frontend test coverage
-- [ ] Error monitoring and structured logging in production
+- [x] Error monitoring and structured logging in production
 - [ ] Internationalisation (UI language selection)
 
 ---
