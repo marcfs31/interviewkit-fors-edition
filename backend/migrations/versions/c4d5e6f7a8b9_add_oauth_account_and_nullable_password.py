@@ -27,5 +27,17 @@ def upgrade():
 
 
 def downgrade():
+    # Restoring NOT NULL would fail on OAuth-only users; refuse up front with
+    # an actionable message instead of a raw Postgres error. Never touch data.
+    oauth_only = op.get_bind().execute(
+        sa.text('SELECT count(*) FROM "user" WHERE password IS NULL')
+    ).scalar()
+    if oauth_only:
+        raise RuntimeError(
+            f"No se puede revertir: hay {oauth_only} usuario(s) sin contraseña "
+            "(solo OAuth). Elimínalos o asígnales una contraseña antes de "
+            "hacer el downgrade."
+        )
+
     op.drop_table("oauth_account")
     op.alter_column("user", "password", existing_type=sa.String(250), nullable=False)
