@@ -91,7 +91,7 @@ def _build_login_response(user):
     access_token = create_access_token(
         identity=str(user.user_id), expires_delta=expires_delta
     )
-    frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:3000")
+    frontend_url = current_app.config["FRONTEND_URL"]
     # The code goes in the URL fragment: browsers never send fragments to a
     # server, so it stays out of access logs and Referer headers.
     code = _code_serializer().dumps({"uid": user.user_id})
@@ -130,7 +130,7 @@ def google_login():
         redirect_uri = url_for("oauth.google_callback", _external=True)
         return oauth.google.authorize_redirect(redirect_uri)
     except Exception:
-        frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:3000")
+        frontend_url = current_app.config["FRONTEND_URL"]
         return redirect(f"{frontend_url}/login?error=oauth_failed")
 
 
@@ -140,7 +140,7 @@ def google_callback():
         token = oauth.google.authorize_access_token()
     except Exception as e:
         current_app.logger.warning("google authorize_access_token failed: %s", e)
-        frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:3000")
+        frontend_url = current_app.config["FRONTEND_URL"]
         return redirect(f"{frontend_url}/login?error=oauth_failed")
 
     try:
@@ -153,7 +153,7 @@ def google_callback():
                 userinfo = oauth.google.userinfo(token=token)
             except Exception as e:
                 current_app.logger.warning("google userinfo fallback failed: %s", e)
-                frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:3000")
+                frontend_url = current_app.config["FRONTEND_URL"]
                 return redirect(f"{frontend_url}/login?error=oauth_failed")
 
         google_id = str(userinfo["sub"])
@@ -170,14 +170,14 @@ def google_callback():
         )
 
         if user is None:
-            frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:3000")
+            frontend_url = current_app.config["FRONTEND_URL"]
             return redirect(f"{frontend_url}/login?error=email_exists")
         
         return _build_login_response(user)
     
     except Exception as e:
         current_app.logger.exception("google callback unhandled error: %s", e)
-        frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:3000")
+        frontend_url = current_app.config["FRONTEND_URL"]
         return redirect(f"{frontend_url}/login?error=oauth_failed")
 
 
@@ -188,7 +188,7 @@ def github_login():
         return oauth.github.authorize_redirect(redirect_uri)
     except Exception as e:
         current_app.logger.warning("github authorize_redirect failed: %s", e)
-        frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:3000")
+        frontend_url = current_app.config["FRONTEND_URL"]
         return redirect(f"{frontend_url}/login?error=oauth_failed")
 
 
@@ -198,7 +198,7 @@ def github_callback():
         token = oauth.github.authorize_access_token()
     except Exception as e:
         current_app.logger.warning("github authorize_access_token failed: %s", e)
-        frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:3000")
+        frontend_url = current_app.config["FRONTEND_URL"]
         return redirect(f"{frontend_url}/login?error=oauth_failed")
 
     try:
@@ -228,12 +228,12 @@ def github_callback():
         )
 
         if user is None:
-            frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:3000")
+            frontend_url = current_app.config["FRONTEND_URL"]
             return redirect(f"{frontend_url}/login?error=email_exists")
 
         return _build_login_response(user)
     
     except Exception as e:
         current_app.logger.exception("github callback unhandled error: %s", e)
-        frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:3000")
+        frontend_url = current_app.config["FRONTEND_URL"]
         return redirect(f"{frontend_url}/login?error=oauth_failed")
