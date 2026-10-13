@@ -70,7 +70,7 @@ export async function exchangeOAuthCode(code: string): Promise<LoginUserResponse
     body: JSON.stringify({ code }),
   });
   if (!response.ok) {
-    throw new Error(`No se pudo completar el inicio de sesion (${response.status})`);
+    throw new Error(`No se pudo completar el inicio de sesión (${response.status})`);
   }
   return response.json();
 }
