@@ -68,6 +68,31 @@ class TestRegister:
         assert saved is not None
         assert saved.name == "Padded Name"
 
+    def test_register_stores_email_lowercased(self, client, db):
+        from app.models.user import User
+        payload = {"name": "Mixed Case", "email": "  Mixed.Case@Example.COM ", "password": "password123"}
+        assert client.post("/auth/register", json=payload).status_code == 201
+
+        saved = User.query.filter_by(name="Mixed Case").one()
+        assert saved.email == "mixed.case@example.com"
+
+    def test_register_duplicate_email_differing_only_in_case_returns_409(self, client, registered_user):
+        payload = {"name": "Shouty", "email": registered_user["email"].upper(), "password": "anotherpass1"}
+        resp = client.post("/auth/register", json=payload)
+        assert resp.status_code == 409
+
+    def test_register_duplicate_of_a_legacy_mixed_case_row_returns_409(self, client, db):
+        from app.models.user import User
+        db.session.add(User(name="Legacy", email="Legacy@Example.com", password="x"))
+        db.session.commit()
+
+        payload = {"name": "Dup", "email": "legacy@example.com", "password": "anotherpass1"}
+        assert client.post("/auth/register", json=payload).status_code == 409
+
+    def test_register_distinct_emails_are_both_accepted(self, client, registered_user):
+        payload = {"name": "Other", "email": "other@example.com", "password": "anotherpass1"}
+        assert client.post("/auth/register", json=payload).status_code == 201
+
 
 class TestLogin:
     def test_login_success_returns_token_and_sets_no_cookie(self, client, registered_user):
@@ -102,6 +127,23 @@ class TestLogin:
         resp = client.post("/auth/login", json=payload)
         assert resp.status_code == 400
         assert "error" in resp.get_json()
+
+    def test_login_is_case_insensitive_for_a_legacy_mixed_case_row(self, client, db):
+        """Rows created before emails were lowercased keep their stored case;
+        login must still find them whatever case the user types."""
+        import bcrypt
+        from app.models.user import User
+        hashed = bcrypt.hashpw(b"password123", bcrypt.gensalt(4)).decode("utf-8")
+        db.session.add(User(name="Legacy", email="Legacy@Example.com", password=hashed))
+        db.session.commit()
+
+        for typed in ("legacy@example.com", "LEGACY@EXAMPLE.COM", " Legacy@Example.com "):
+            resp = client.post("/auth/login", json={"email": typed, "password": "password123"})
+            assert resp.status_code == 200, typed
+
+    def test_login_with_another_case_still_rejects_a_wrong_password(self, client, registered_user):
+        resp = client.post("/auth/login", json={"email": registered_user["email"].upper(), "password": "wrong-password"})
+        assert resp.status_code == 400
 
     def test_login_missing_fields_returns_400(self, client, db):
         resp = client.post("/auth/login", json={"email": "", "password": ""})
