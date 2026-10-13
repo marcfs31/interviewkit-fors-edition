@@ -26,7 +26,7 @@ class Card(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def serialize(self):
-        return{
+        return {
             "card_id": self.card_id,
             "question_id": self.question_id,
             "session_id": self.session_id,
@@ -41,5 +41,5 @@ class Card(db.Model):
             "code_language": self.code_language,
             "tags": self.tags or [],
             "difficulty": self.difficulty,
-            "created_at": self.created_at.isoformat()
+            "created_at": self.created_at.isoformat(),
         }

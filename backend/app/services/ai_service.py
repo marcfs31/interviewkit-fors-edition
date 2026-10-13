@@ -97,6 +97,7 @@ class AIUnavailableError(Exception):
         self.status = status
         self.retry_after = retry_after
 
+
 # Defaults for the OPTIONAL card fields the model left out. "concept" has no
 # default: a card without one is unusable output.
 EMPTY_CARD = {
@@ -173,7 +174,9 @@ def _rollback_quietly():
     try:
         db.session.rollback()
     except Exception:
-        logger.warning("Rollback after a failed ai_call write also failed", exc_info=True)
+        logger.warning(
+            "Rollback after a failed ai_call write also failed", exc_info=True
+        )
 
 
 def _record_call(kind, started, status, completion=None, http_status=None, error=None):
@@ -245,7 +248,11 @@ def _call_groq(kind, **kwargs):
             status=429,
             retry_after=_retry_after_seconds(error),
         ) from error
-    except (groq.APITimeoutError, groq.APIConnectionError, groq.APIStatusError) as error:
+    except (
+        groq.APITimeoutError,
+        groq.APIConnectionError,
+        groq.APIStatusError,
+    ) as error:
         logger.warning("Groq %s failed: %s", kind, error)
         # APITimeoutError subclasses APIConnectionError: check it first.
         if isinstance(error, groq.APITimeoutError):
@@ -255,8 +262,11 @@ def _call_groq(kind, **kwargs):
         else:
             status = "api_error"
         _record_call(
-            kind, started, status,
-            http_status=getattr(error, "status_code", None), error=error,
+            kind,
+            started,
+            status,
+            http_status=getattr(error, "status_code", None),
+            error=error,
         )
         raise AIUnavailableError(
             "La IA no está disponible ahora mismo. Inténtalo de nuevo."
@@ -280,11 +290,7 @@ def fix_literal_escapes(text):
     breaks instead of visible backslash-n."""
     if not isinstance(text, str) or "\\" not in text:
         return text
-    return (
-        text.replace("\\r\\n", "\n")
-            .replace("\\n", "\n")
-            .replace("\\t", "\t")
-    )
+    return text.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\t", "\t")
 
 
 def _parse_ai_json(raw_content):
@@ -314,12 +320,21 @@ def _safe_card(card_data):
             continue
         value = card_data[key]
         if key == "tags":
-            if not isinstance(value, list) or not all(isinstance(tag, str) for tag in value):
+            if not isinstance(value, list) or not all(
+                isinstance(tag, str) for tag in value
+            ):
                 raise ValueError("card tags is not a list of strings")
         elif not isinstance(value, str):
             raise ValueError(f"card {key} is not a string")
         safe[key] = value
-    for key in ("definition", "explanation", "use_case", "avoid_when", "mnemonic", "code"):
+    for key in (
+        "definition",
+        "explanation",
+        "use_case",
+        "avoid_when",
+        "mnemonic",
+        "code",
+    ):
         safe[key] = fix_literal_escapes(safe[key])
     return safe
 
@@ -329,7 +344,9 @@ def _unusable_feedback(reason):
     ai_call row as "unusable_output" and returns the 502 for the caller to raise."""
     logger.warning("Groq feedback: unusable model output (%s)", reason)
     _mark_last_call("unusable_output")
-    return AIUnavailableError("La IA no devolvió una corrección válida. Inténtalo de nuevo.", status=502)
+    return AIUnavailableError(
+        "La IA no devolvió una corrección válida. Inténtalo de nuevo.", status=502
+    )
 
 
 def _safe_feedback(data):
@@ -341,7 +358,9 @@ def _safe_feedback(data):
     raw_result = data.get("result")
     result = raw_result.strip().upper() if isinstance(raw_result, str) else None
     if result not in VALID_RESULTS:
-        raise _unusable_feedback("result is not CORRECT, PARTIALLY_CORRECT or INCORRECT")
+        raise _unusable_feedback(
+            "result is not CORRECT, PARTIALLY_CORRECT or INCORRECT"
+        )
     feedback = data.get("feedback")
     if not isinstance(feedback, str) or not feedback.strip():
         raise _unusable_feedback("feedback is missing or blank")
@@ -378,7 +397,7 @@ def _fetch_questions(stack, level, topic):
                     f"Generate interview questions for {stack} at {level} level, "
                     f"focused on the topic: {topic or 'General / Mixto'}."
                 ),
-            }
+            },
         ],
         response_format={"type": "json_object"},
     )
@@ -416,7 +435,9 @@ def generate_questions(stack, level, topic):
             }
         logger.warning(
             "Groq questions: attempt %s gave %s theory and %s code questions",
-            attempt, len(theory), len(code),
+            attempt,
+            len(theory),
+            len(code),
         )
         _mark_last_call("unusable_output")
     raise AIUnavailableError(

@@ -8,10 +8,10 @@ from ..models.card import Card
 from ..constants.gamification import XP_PER_LEVEL, compute_level, xp_to_next_level
 from .. import db
 
-user = Blueprint('user', __name__, url_prefix='/me')
+user = Blueprint("user", __name__, url_prefix="/me")
 
 
-@user.route('/stats', methods=['GET'])
+@user.route("/stats", methods=["GET"])
 @jwt_required()
 def get_my_stats():
     """Returns the authenticated user's full stats."""
@@ -71,7 +71,9 @@ def get_my_stats():
     recent_session_ids = [sess.session_id for sess in recent_sessions_rows]
     questions_by_session = {}
     if recent_session_ids:
-        for q in Question.query.filter(Question.session_id.in_(recent_session_ids)).all():
+        for q in Question.query.filter(
+            Question.session_id.in_(recent_session_ids)
+        ).all():
             questions_by_session.setdefault(q.session_id, []).append(q)
 
     recent_sessions = []
@@ -81,15 +83,17 @@ def get_my_stats():
         correct = sum(1 for q in questions if q.result == "CORRECT")
         partially = sum(1 for q in questions if q.result == "PARTIALLY_CORRECT")
         incorrect = sum(1 for q in questions if q.result == "INCORRECT")
-        recent_sessions.append({
-            "stack": sess.stack,
-            "level": sess.level,
-            "created_at": sess.created_at.isoformat() if sess.created_at else None,
-            "total_questions": total_questions,
-            "correct": correct,
-            "partially_correct": partially,
-            "incorrect": incorrect,
-        })
+        recent_sessions.append(
+            {
+                "stack": sess.stack,
+                "level": sess.level,
+                "created_at": sess.created_at.isoformat() if sess.created_at else None,
+                "total_questions": total_questions,
+                "correct": correct,
+                "partially_correct": partially,
+                "incorrect": incorrect,
+            }
+        )
 
     # --- Cards summary: total + top 5 tags ---
     cards_total = Card.query.filter_by(user_id=user_id).count()
@@ -105,23 +109,27 @@ def get_my_stats():
                 # Rows stored before tags were validated may hold lists/dicts.
                 if isinstance(tag, str):
                     tag_counter[tag] = tag_counter.get(tag, 0) + 1
-    top_tags = [t for t, _ in sorted(tag_counter.items(), key=lambda x: x[1], reverse=True)][:5]
+    top_tags = [
+        t for t, _ in sorted(tag_counter.items(), key=lambda x: x[1], reverse=True)
+    ][:5]
 
-    return jsonify({
-        "total_xp": total_xp,
-        "level": level,
-        "xp_to_next_level": xp_to_next_level(total_xp),
-        "progress_in_level": progress_in_level,
-        "xp_per_level": XP_PER_LEVEL,
-        "results_summary": results_summary,
-        "stacks_stats": stacks_stats,
-        "sessions_count": sessions_count,
-        "recent_sessions": recent_sessions,
-        "cards_summary": {"total": cards_total, "top_tags": top_tags},
-    })
+    return jsonify(
+        {
+            "total_xp": total_xp,
+            "level": level,
+            "xp_to_next_level": xp_to_next_level(total_xp),
+            "progress_in_level": progress_in_level,
+            "xp_per_level": XP_PER_LEVEL,
+            "results_summary": results_summary,
+            "stacks_stats": stacks_stats,
+            "sessions_count": sessions_count,
+            "recent_sessions": recent_sessions,
+            "cards_summary": {"total": cards_total, "top_tags": top_tags},
+        }
+    )
 
 
-@user.route('/profile', methods=['GET'])
+@user.route("/profile", methods=["GET"])
 @jwt_required()
 def get_my_profile():
     """Returns the authenticated user's public profile data."""
@@ -129,23 +137,25 @@ def get_my_profile():
     user_row = User.query.filter_by(user_id=user_id).first()
     if user_row is None:
         return jsonify({"msg": "Usuario no encontrado"}), 404
-    
+
     total_xp = user_row.total_xp or 0
     level = compute_level(total_xp)
     progress_in_level = max(0, total_xp - ((level - 1) * XP_PER_LEVEL))
 
-    return jsonify({
-        "name": user_row.name,
-        "email": user_row.email,
-        "total_xp": total_xp,
-        "level": level,
-        "progress_in_level": progress_in_level,
-        "xp_per_level": XP_PER_LEVEL,
-        "xp_to_next_level": xp_to_next_level(total_xp),
-    })
+    return jsonify(
+        {
+            "name": user_row.name,
+            "email": user_row.email,
+            "total_xp": total_xp,
+            "level": level,
+            "progress_in_level": progress_in_level,
+            "xp_per_level": XP_PER_LEVEL,
+            "xp_to_next_level": xp_to_next_level(total_xp),
+        }
+    )
 
 
-@user.route('/profile', methods=['PATCH'])
+@user.route("/profile", methods=["PATCH"])
 @jwt_required()
 def update_my_profile():
     """Updates the authenticated user's profile data."""
@@ -162,7 +172,9 @@ def update_my_profile():
     user_row.name = name[:80]
     db.session.commit()
 
-    return jsonify({
-        "name": user_row.name,
-        "email": user_row.email,
-    })
+    return jsonify(
+        {
+            "name": user_row.name,
+            "email": user_row.email,
+        }
+    )

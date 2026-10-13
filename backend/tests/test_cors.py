@@ -2,6 +2,7 @@
 CORS policy: the API authenticates with the Authorization header only, so it
 must not ask browsers to attach cookies to cross-origin requests.
 """
+
 import pytest
 
 from app import create_app
@@ -16,7 +17,9 @@ class TestCorsPolicy:
         assert resp.headers.get("Access-Control-Allow-Origin") == ORIGIN
         assert "Access-Control-Allow-Credentials" not in resp.headers
 
-    def test_preflight_allows_the_authorization_header_without_credentials(self, client, db):
+    def test_preflight_allows_the_authorization_header_without_credentials(
+        self, client, db
+    ):
         resp = client.options(
             "/me/profile",
             headers={

@@ -5,6 +5,7 @@ The endpoint runs Postgres-only SQL (information_schema), so the 200 path
 must mock `db.session.execute` -- on the SQLite test database the real
 query would hit the handler's except branch and return 500.
 """
+
 from unittest.mock import MagicMock
 
 
@@ -34,12 +35,14 @@ class TestDbStatus:
     def test_returns_200_with_exact_json_shape(self, client, auth_headers, monkeypatch):
         """With a valid JWT and (mocked) DB responses, the endpoint must
         return exactly the documented shape -- no extra or missing keys."""
-        execute = MagicMock(side_effect=[
-            _FakeResult(rows=[("user",), ("session",), ("card",)]),
-            _FakeResult(scalar_value=1),
-            _FakeResult(scalar_value=2),
-            _FakeResult(scalar_value=3),
-        ])
+        execute = MagicMock(
+            side_effect=[
+                _FakeResult(rows=[("user",), ("session",), ("card",)]),
+                _FakeResult(scalar_value=1),
+                _FakeResult(scalar_value=2),
+                _FakeResult(scalar_value=3),
+            ]
+        )
         monkeypatch.setattr("app.routes.debug.db.session.execute", execute)
 
         resp = client.get("/debug/db", headers=_headers_without_user(auth_headers))

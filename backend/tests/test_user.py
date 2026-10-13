@@ -6,6 +6,7 @@ the identity embedded in the token. The stats endpoint aggregates sessions,
 questions (via a Question->Session join), and cards, so most of the tests
 here seed rows directly through the models using the `db` fixture.
 """
+
 from datetime import datetime
 
 import pytest
@@ -21,7 +22,9 @@ from app.models.card import Card
 # --- Seed helpers (module-level functions, not fixtures) ---
 
 
-def _seed_session(db, user_id, stack="Python", level="Básico", created_at=None, results=()):
+def _seed_session(
+    db, user_id, stack="Python", level="Básico", created_at=None, results=()
+):
     """Create a session for `user_id` plus one Question per entry in `results`.
 
     `results` values are stored as-is (use None to leave a question without a
@@ -116,7 +119,9 @@ class QueryCounter:
 class TestGetMyStats:
     """Tests for GET /me/stats."""
 
-    def test_returns_xp_and_level_fields_for_the_authenticated_user(self, client, db, app, auth_headers):
+    def test_returns_xp_and_level_fields_for_the_authenticated_user(
+        self, client, db, app, auth_headers
+    ):
         """XP fields are computed from total_xp (the stored User.level column
         is ignored by the route)."""
         with app.app_context():
@@ -134,13 +139,20 @@ class TestGetMyStats:
         assert data["progress_in_level"] == 250  # 750 - 500
         assert data["xp_per_level"] == 500
 
-    def test_results_summary_counts_questions_by_result_via_session_join(self, client, db, app, auth_headers):
+    def test_results_summary_counts_questions_by_result_via_session_join(
+        self, client, db, app, auth_headers
+    ):
         """A mix of results across two sessions, plus one question with a NULL
         result that must be excluded from every bucket."""
         user_id = auth_headers["user_id"]
         with app.app_context():
             _seed_session(db, user_id, stack="Python", results=["CORRECT", "CORRECT"])
-            _seed_session(db, user_id, stack="JavaScript", results=["PARTIALLY_CORRECT", "INCORRECT", None])
+            _seed_session(
+                db,
+                user_id,
+                stack="JavaScript",
+                results=["PARTIALLY_CORRECT", "INCORRECT", None],
+            )
             db.session.commit()
 
         resp = client.get("/me/stats", headers=_headers_without_user(auth_headers))
@@ -153,7 +165,9 @@ class TestGetMyStats:
             "incorrect": 1,
         }
 
-    def test_stacks_stats_groups_sessions_and_cards_by_stack(self, client, db, app, auth_headers):
+    def test_stacks_stats_groups_sessions_and_cards_by_stack(
+        self, client, db, app, auth_headers
+    ):
         """stacks_stats is built from a GROUP BY, so row order is not
         guaranteed -- compare as a dict keyed by stack name."""
         user_id = auth_headers["user_id"]
@@ -177,19 +191,29 @@ class TestGetMyStats:
         }
         assert data["sessions_count"] == 3
 
-    def test_recent_sessions_returns_last_five_with_question_breakdown(self, client, db, app, auth_headers):
+    def test_recent_sessions_returns_last_five_with_question_breakdown(
+        self, client, db, app, auth_headers
+    ):
         """Six sessions with explicit created_at values: only the five newest
         must be returned, ordered descending, each with its own breakdown."""
         user_id = auth_headers["user_id"]
         with app.app_context():
             # Oldest (day 1) -- must be excluded (6 sessions, limit 5).
-            _seed_session(db, user_id, created_at=datetime(2026, 1, 1), results=["CORRECT"])
+            _seed_session(
+                db, user_id, created_at=datetime(2026, 1, 1), results=["CORRECT"]
+            )
             _seed_session(db, user_id, created_at=datetime(2026, 1, 2))
             _seed_session(db, user_id, created_at=datetime(2026, 1, 3))
-            _seed_session(db, user_id, created_at=datetime(2026, 1, 4), results=["CORRECT"])
-            _seed_session(db, user_id, created_at=datetime(2026, 1, 5), results=["CORRECT"])
+            _seed_session(
+                db, user_id, created_at=datetime(2026, 1, 4), results=["CORRECT"]
+            )
+            _seed_session(
+                db, user_id, created_at=datetime(2026, 1, 5), results=["CORRECT"]
+            )
             _seed_session(  # newest (day 6)
-                db, user_id, created_at=datetime(2026, 1, 6),
+                db,
+                user_id,
+                created_at=datetime(2026, 1, 6),
                 results=["CORRECT", "PARTIALLY_CORRECT", "INCORRECT"],
             )
             db.session.commit()
@@ -234,7 +258,9 @@ class TestGetMyStats:
         assert fourth["partially_correct"] == 0
         assert fourth["incorrect"] == 0
 
-    def test_query_count_does_not_scale_with_number_of_sessions(self, client, db, app, auth_headers):
+    def test_query_count_does_not_scale_with_number_of_sessions(
+        self, client, db, app, auth_headers
+    ):
         """Regression test for the recent_sessions N+1 bug.
 
         The old implementation issued one extra query per session to build the
@@ -248,7 +274,9 @@ class TestGetMyStats:
         with app.app_context():
             for i in range(2):
                 _seed_session(
-                    db, user_id, created_at=datetime(2026, 3, 1 + i),
+                    db,
+                    user_id,
+                    created_at=datetime(2026, 3, 1 + i),
                     results=["CORRECT", "INCORRECT"],
                 )
             db.session.commit()
@@ -261,7 +289,9 @@ class TestGetMyStats:
         with app.app_context():
             for i in range(4):  # grow to 6 sessions total
                 _seed_session(
-                    db, user_id, created_at=datetime(2026, 3, 3 + i),
+                    db,
+                    user_id,
+                    created_at=datetime(2026, 3, 3 + i),
                     results=["CORRECT"],
                 )
             db.session.commit()
@@ -278,7 +308,9 @@ class TestGetMyStats:
         # The real regression guard: 4 extra sessions must not add 4 queries.
         assert six_sessions.count <= two_sessions.count + 1
 
-    def test_cards_summary_returns_total_and_top_five_tags(self, client, db, app, auth_headers):
+    def test_cards_summary_returns_total_and_top_five_tags(
+        self, client, db, app, auth_headers
+    ):
         """Six cards with strictly decreasing tag frequencies (6,5,4,3,2,1):
         top_tags must contain the five most frequent tags in order and drop
         the sixth."""
@@ -304,14 +336,21 @@ class TestGetMyStats:
         assert data["cards_summary"]["total"] == 6
         assert data["cards_summary"]["top_tags"] == ["A", "B", "C", "D", "E"]
 
-    def test_non_string_tags_already_stored_are_ignored_not_a_500(self, client, db, app, auth_headers):
+    def test_non_string_tags_already_stored_are_ignored_not_a_500(
+        self, client, db, app, auth_headers
+    ):
         """Rows saved before tags were validated can hold nested lists, dicts
         or numbers (unhashable as a counter key): they are skipped and the
         string tags are still counted."""
         user_id = auth_headers["user_id"]
         with app.app_context():
             sess = _seed_session(db, user_id, stack="Python")
-            _seed_card(db, user_id, sess.session_id, tags=[["nested"], {"k": "v"}, 7, None, "ok", "ok"])
+            _seed_card(
+                db,
+                user_id,
+                sess.session_id,
+                tags=[["nested"], {"k": "v"}, 7, None, "ok", "ok"],
+            )
             _seed_card(db, user_id, sess.session_id, tags=["ok", "other"])
             db.session.commit()
 
@@ -337,20 +376,28 @@ class TestGetMyStats:
         assert data["level"] == 1
         assert data["progress_in_level"] == 0
         assert data["xp_to_next_level"] == 500
-        assert data["results_summary"] == {"correct": 0, "partially_correct": 0, "incorrect": 0}
+        assert data["results_summary"] == {
+            "correct": 0,
+            "partially_correct": 0,
+            "incorrect": 0,
+        }
         assert data["stacks_stats"] == []
         assert data["sessions_count"] == 0
         assert data["recent_sessions"] == []
         assert data["cards_summary"] == {"total": 0, "top_tags": []}
 
-    def test_stats_are_isolated_between_users(self, client, db, app, auth_headers, second_user_headers):
+    def test_stats_are_isolated_between_users(
+        self, client, db, app, auth_headers, second_user_headers
+    ):
         """User B's stats must contain none of user A's sessions, questions,
         or cards -- and vice versa."""
         user_a = auth_headers["user_id"]
         user_b = second_user_headers["user_id"]
         with app.app_context():
             # Rich data for user A.
-            a1 = _seed_session(db, user_a, stack="Python", results=["CORRECT", "CORRECT", "INCORRECT"])
+            a1 = _seed_session(
+                db, user_a, stack="Python", results=["CORRECT", "CORRECT", "INCORRECT"]
+            )
             a2 = _seed_session(db, user_a, stack="JavaScript", results=["CORRECT"])
             _seed_card(db, user_a, a1.session_id, tags=["python"])
             _seed_card(db, user_a, a2.session_id, tags=["javascript"])
@@ -360,11 +407,17 @@ class TestGetMyStats:
             db.session.commit()
 
         # User B sees exactly B's data.
-        resp_b = client.get("/me/stats", headers=_headers_without_user(second_user_headers))
+        resp_b = client.get(
+            "/me/stats", headers=_headers_without_user(second_user_headers)
+        )
         assert resp_b.status_code == 200
         data_b = resp_b.get_json()
         assert data_b["sessions_count"] == 1
-        assert data_b["results_summary"] == {"correct": 0, "partially_correct": 0, "incorrect": 1}
+        assert data_b["results_summary"] == {
+            "correct": 0,
+            "partially_correct": 0,
+            "incorrect": 1,
+        }
         stacks_b = {s["stack"]: s for s in data_b["stacks_stats"]}
         assert stacks_b == {"React": {"stack": "React", "sessions": 1, "cards": 1}}
         assert len(data_b["recent_sessions"]) == 1
@@ -376,10 +429,17 @@ class TestGetMyStats:
         assert resp_a.status_code == 200
         data_a = resp_a.get_json()
         assert data_a["sessions_count"] == 2
-        assert data_a["results_summary"] == {"correct": 3, "partially_correct": 0, "incorrect": 1}
+        assert data_a["results_summary"] == {
+            "correct": 3,
+            "partially_correct": 0,
+            "incorrect": 1,
+        }
         stacks_a = {s["stack"] for s in data_a["stacks_stats"]}
         assert stacks_a == {"Python", "JavaScript"}
-        assert data_a["cards_summary"] == {"total": 2, "top_tags": ["python", "javascript"]}
+        assert data_a["cards_summary"] == {
+            "total": 2,
+            "top_tags": ["python", "javascript"],
+        }
 
     def test_stats_requires_authentication(self, client):
         """No JWT -> 401 before any database work happens."""
@@ -396,7 +456,9 @@ class TestGetMyProfile:
         assert resp.status_code == 404
         assert resp.get_json()["msg"] == "Usuario no encontrado"
 
-    def test_returns_profile_fields_for_existing_user(self, client, db, app, auth_headers):
+    def test_returns_profile_fields_for_existing_user(
+        self, client, db, app, auth_headers
+    ):
         """All expected keys with values computed from total_xp."""
         with app.app_context():
             user = User.query.filter_by(user_id=auth_headers["user_id"]).first()
@@ -415,8 +477,13 @@ class TestGetMyProfile:
         assert data["xp_per_level"] == 500
         assert data["xp_to_next_level"] == 250
         assert set(data.keys()) == {
-            "name", "email", "total_xp", "level",
-            "progress_in_level", "xp_per_level", "xp_to_next_level",
+            "name",
+            "email",
+            "total_xp",
+            "level",
+            "progress_in_level",
+            "xp_per_level",
+            "xp_to_next_level",
         }
 
     def test_requires_authentication(self, client):
@@ -545,7 +612,9 @@ class TestPatchMyProfile:
         resp = client.patch("/me/profile", json={"name": "X"})
         assert resp.status_code == 401
 
-    def test_update_is_isolated_between_users(self, client, db, app, auth_headers, second_user_headers):
+    def test_update_is_isolated_between_users(
+        self, client, db, app, auth_headers, second_user_headers
+    ):
         """User A's PATCH must not touch user B, and B can still update
         their own name independently."""
         resp_a = client.patch(
@@ -556,7 +625,9 @@ class TestPatchMyProfile:
         assert resp_a.status_code == 200
 
         # B still sees their original name.
-        resp_b = client.get("/me/profile", headers=_headers_without_user(second_user_headers))
+        resp_b = client.get(
+            "/me/profile", headers=_headers_without_user(second_user_headers)
+        )
         assert resp_b.status_code == 200
         assert resp_b.get_json()["name"] == "User B"
 

@@ -10,5 +10,7 @@ class OAuthAccount(db.Model):
     provider_user_id = db.Column(db.String(250), nullable=False)
 
     __table_args__ = (
-        db.UniqueConstraint("provider", "provider_user_id", name="uq_oauth_provider_user"),
+        db.UniqueConstraint(
+            "provider", "provider_user_id", name="uq_oauth_provider_user"
+        ),
     )

@@ -3,6 +3,7 @@ Tests for the ai_call table: one metadata row per real Groq call, retries and
 failures included. Groq is never reached: `client.chat.completions.create` is
 stubbed, so the real `_call_groq` / `_record_call` path runs.
 """
+
 import itertools
 import json
 from types import SimpleNamespace
@@ -24,7 +25,11 @@ from app.services.ai_service import (
 )
 
 GOOD_QUESTIONS = {"theory": ["T1", "T2"], "code": ["C1", "C2", "C3"]}
-GOOD_FEEDBACK = {"result": "CORRECT", "feedback": "Bien.", "card": {"concept": "Closures"}}
+GOOD_FEEDBACK = {
+    "result": "CORRECT",
+    "feedback": "Bien.",
+    "card": {"concept": "Closures"},
+}
 
 
 def _completion(content, usage=True):
@@ -32,7 +37,9 @@ def _completion(content, usage=True):
         choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
     )
     if usage:
-        completion.usage = SimpleNamespace(prompt_tokens=11, completion_tokens=22, total_tokens=33)
+        completion.usage = SimpleNamespace(
+            prompt_tokens=11, completion_tokens=22, total_tokens=33
+        )
     return completion
 
 
@@ -54,6 +61,7 @@ def _rate_limit_error():
 def _raiser(error):
     def boom(**kwargs):
         raise error
+
     return boom
 
 
@@ -75,13 +83,20 @@ class TestRecordedRows:
         assert row.stack == "Python"
         assert row.session_id == 7
         assert row.attempt == 1
-        assert (row.prompt_tokens, row.completion_tokens, row.total_tokens) == (11, 22, 33)
+        assert (row.prompt_tokens, row.completion_tokens, row.total_tokens) == (
+            11,
+            22,
+            33,
+        )
         assert row.latency_ms >= 0
         assert row.created_at is not None
         assert row.http_status is None and row.error_type is None
 
     def test_ok_call_without_usage_leaves_tokens_null(self, db, monkeypatch):
-        _stub_create(monkeypatch, lambda **kw: _completion(json.dumps(GOOD_FEEDBACK), usage=False))
+        _stub_create(
+            monkeypatch,
+            lambda **kw: _completion(json.dumps(GOOD_FEEDBACK), usage=False),
+        )
 
         generate_feedback("Python", "Q?", "A")
 
@@ -122,7 +137,10 @@ class TestRecordedRows:
 
     def test_api_error_keeps_the_http_status(self, db, monkeypatch):
         response = httpx.Response(500, request=_request())
-        _stub_create(monkeypatch, _raiser(groq.APIStatusError("boom", response=response, body=None)))
+        _stub_create(
+            monkeypatch,
+            _raiser(groq.APIStatusError("boom", response=response, body=None)),
+        )
 
         with pytest.raises(AIUnavailableError):
             generate_feedback("Python", "Q?", "A")
@@ -160,14 +178,20 @@ class TestRecordedRows:
 
         assert _rows()[0].status == "unreadable_json"
 
-    @pytest.mark.parametrize("payload", [
-        {"result": None, "feedback": "Bien.", "card": {"concept": "C"}},
-        {"result": "MAYBE", "feedback": "Bien.", "card": {"concept": "C"}},
-        {"result": "CORRECT", "feedback": "", "card": {"concept": "C"}},
-        {"result": "CORRECT", "feedback": "Bien.", "card": {"concept": ""}},
-        {},
-    ], ids=repr)
-    def test_object_with_unusable_content_is_marked_unusable_output(self, db, monkeypatch, payload):
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"result": None, "feedback": "Bien.", "card": {"concept": "C"}},
+            {"result": "MAYBE", "feedback": "Bien.", "card": {"concept": "C"}},
+            {"result": "CORRECT", "feedback": "", "card": {"concept": "C"}},
+            {"result": "CORRECT", "feedback": "Bien.", "card": {"concept": ""}},
+            {},
+        ],
+        ids=repr,
+    )
+    def test_object_with_unusable_content_is_marked_unusable_output(
+        self, db, monkeypatch, payload
+    ):
         _stub_create(monkeypatch, lambda **kw: _completion(json.dumps(payload)))
 
         with pytest.raises(AIUnavailableError) as exc_info:
@@ -194,13 +218,18 @@ class TestQuestionAttempts:
             ("questions", "Python", "Básico", "async")
         }
 
-    def test_second_attempt_success_leaves_a_failed_and_an_ok_row(self, db, monkeypatch):
+    def test_second_attempt_success_leaves_a_failed_and_an_ok_row(
+        self, db, monkeypatch
+    ):
         outputs = iter(["garbage", json.dumps(GOOD_QUESTIONS)])
         _stub_create(monkeypatch, lambda **kw: _completion(next(outputs)))
 
         assert generate_questions("Python", "Básico", None) == GOOD_QUESTIONS
 
-        assert [(r.attempt, r.status) for r in _rows()] == [(1, "unreadable_json"), (2, "ok")]
+        assert [(r.attempt, r.status) for r in _rows()] == [
+            (1, "unreadable_json"),
+            (2, "ok"),
+        ]
 
     def test_valid_json_that_is_not_an_object_is_unreadable(self, db, monkeypatch):
         _stub_create(monkeypatch, lambda **kw: _completion("[1, 2]"))
@@ -210,8 +239,13 @@ class TestQuestionAttempts:
 
         assert {r.status for r in _rows()} == {"unreadable_json"}
 
-    def test_incomplete_but_readable_output_is_marked_unusable_output(self, db, monkeypatch):
-        _stub_create(monkeypatch, lambda **kw: _completion(json.dumps({"theory": ["T1"], "code": []})))
+    def test_incomplete_but_readable_output_is_marked_unusable_output(
+        self, db, monkeypatch
+    ):
+        _stub_create(
+            monkeypatch,
+            lambda **kw: _completion(json.dumps({"theory": ["T1"], "code": []})),
+        )
 
         with pytest.raises(AIUnavailableError) as exc_info:
             generate_questions("Python", "Básico", None)
@@ -243,7 +277,9 @@ class TestRecordingNeverBreaksTheRequest:
         assert data["result"] == "CORRECT"
         assert "Could not record the AI call" in caplog.text
 
-    def test_a_failing_commit_is_rolled_back_and_the_session_stays_usable(self, db, monkeypatch):
+    def test_a_failing_commit_is_rolled_back_and_the_session_stays_usable(
+        self, db, monkeypatch
+    ):
         _stub_create(monkeypatch, lambda **kw: _completion(json.dumps(GOOD_FEEDBACK)))
         real_commit = db.session.commit
         calls = {"n": 0}
@@ -262,10 +298,13 @@ class TestRecordingNeverBreaksTheRequest:
         generate_feedback("Python", "Q?", "A")
         assert AICall.query.count() == 1
 
-    def test_failure_while_downgrading_to_unreadable_does_not_break_the_error_path(self, db, monkeypatch):
+    def test_failure_while_downgrading_to_unreadable_does_not_break_the_error_path(
+        self, db, monkeypatch
+    ):
         _stub_create(monkeypatch, lambda **kw: _completion("garbage"))
         monkeypatch.setattr(
-            ai_service.AICall, "query",
+            ai_service.AICall,
+            "query",
             SimpleNamespace(filter_by=_raiser(RuntimeError("no table"))),
         )
 
@@ -291,7 +330,11 @@ class TestPrivacy:
     def test_no_user_or_generated_text_is_stored(self, db, monkeypatch):
         question = "PREGUNTA-SECRETA-123"
         answer = "RESPUESTA-SECRETA-456"
-        feedback = {"result": "CORRECT", "feedback": "FEEDBACK-SECRETO-789", "card": {"concept": "CONCEPTO-SECRETO"}}
+        feedback = {
+            "result": "CORRECT",
+            "feedback": "FEEDBACK-SECRETO-789",
+            "card": {"concept": "CONCEPTO-SECRETO"},
+        }
         generated = json.dumps({"theory": ["PREG-GENERADA-1"], "code": []})
         outputs = itertools.chain([json.dumps(feedback)], itertools.repeat(generated))
         _stub_create(monkeypatch, lambda **kw: _completion(next(outputs)))
@@ -303,16 +346,39 @@ class TestPrivacy:
         rows = _rows()
         assert rows
         dumped = json.dumps(
-            [{c.name: str(getattr(r, c.name)) for c in AICall.__table__.columns} for r in rows]
+            [
+                {c.name: str(getattr(r, c.name)) for c in AICall.__table__.columns}
+                for r in rows
+            ]
         )
-        for secret in (question, answer, "FEEDBACK-SECRETO", "CONCEPTO-SECRETO", "PREG-GENERADA"):
+        for secret in (
+            question,
+            answer,
+            "FEEDBACK-SECRETO",
+            "CONCEPTO-SECRETO",
+            "PREG-GENERADA",
+        ):
             assert secret not in dumped
 
     def test_schema_only_has_metadata_columns(self, app):
         assert {c.name for c in AICall.__table__.columns} == {
-            "id", "created_at", "kind", "model", "stack", "level", "topic", "user_id",
-            "session_id", "attempt", "latency_ms", "prompt_tokens", "completion_tokens",
-            "total_tokens", "status", "http_status", "error_type",
+            "id",
+            "created_at",
+            "kind",
+            "model",
+            "stack",
+            "level",
+            "topic",
+            "user_id",
+            "session_id",
+            "attempt",
+            "latency_ms",
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "status",
+            "http_status",
+            "error_type",
         }
 
     def test_session_id_has_no_foreign_key_and_user_id_sets_null(self, app):
@@ -324,7 +390,9 @@ class TestPrivacy:
 class TestThroughTheRoutes:
     PAYLOAD = {"stack": "JavaScript", "level": "Básico", "topic": "General / Mixto"}
 
-    def test_create_session_records_the_user_and_session(self, client, auth_headers, monkeypatch):
+    def test_create_session_records_the_user_and_session(
+        self, client, auth_headers, monkeypatch
+    ):
         _stub_create(monkeypatch, lambda **kw: _completion(json.dumps(GOOD_QUESTIONS)))
 
         resp = client.post("/sessions/", json=self.PAYLOAD, headers=auth_headers)
@@ -353,7 +421,9 @@ class TestThroughTheRoutes:
     def test_every_attempt_of_a_created_session_carries_its_final_id(
         self, client, auth_headers, monkeypatch
     ):
-        replies = iter([_completion("not json"), _completion(json.dumps(GOOD_QUESTIONS))])
+        replies = iter(
+            [_completion("not json"), _completion(json.dumps(GOOD_QUESTIONS))]
+        )
         _stub_create(monkeypatch, lambda **kw: next(replies))
 
         resp = client.post("/sessions/", json=self.PAYLOAD, headers=auth_headers)
@@ -369,10 +439,16 @@ class TestThroughTheRoutes:
         """Only the rows written by this request's own generation are linked."""
         _stub_create(monkeypatch, lambda **kw: _completion(json.dumps(GOOD_QUESTIONS)))
         other = AICall(
-            kind="questions", model="m", user_id=auth_headers["user_id"], session_id=None,
-            attempt=1, latency_ms=1, status="ok",
+            kind="questions",
+            model="m",
+            user_id=auth_headers["user_id"],
+            session_id=None,
+            attempt=1,
+            latency_ms=1,
+            status="ok",
         )
         from app import db
+
         db.session.add(other)
         db.session.commit()
         other_id = other.id
@@ -386,16 +462,22 @@ class TestThroughTheRoutes:
         self, client, auth_headers, monkeypatch
     ):
         _stub_create(monkeypatch, lambda **kw: _completion(json.dumps(GOOD_QUESTIONS)))
-        monkeypatch.setattr(ai_service, "AICall", _raiser(RuntimeError("table is gone")))
+        monkeypatch.setattr(
+            ai_service, "AICall", _raiser(RuntimeError("table is gone"))
+        )
 
         resp = client.post("/sessions/", json=self.PAYLOAD, headers=auth_headers)
 
         assert resp.status_code == 201
         assert len(resp.get_json()["questions"]) == 5
 
-    def test_answer_question_records_a_feedback_row(self, client, auth_headers, monkeypatch):
+    def test_answer_question_records_a_feedback_row(
+        self, client, auth_headers, monkeypatch
+    ):
         _stub_create(monkeypatch, lambda **kw: _completion(json.dumps(GOOD_QUESTIONS)))
-        created = client.post("/sessions/", json=self.PAYLOAD, headers=auth_headers).get_json()
+        created = client.post(
+            "/sessions/", json=self.PAYLOAD, headers=auth_headers
+        ).get_json()
         _stub_create(monkeypatch, lambda **kw: _completion(json.dumps(GOOD_FEEDBACK)))
 
         resp = client.patch(

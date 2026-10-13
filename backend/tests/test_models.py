@@ -5,6 +5,7 @@ These are pure model/constraint tests -- no HTTP layer involved -- covering
 defaults, nullability, uniqueness constraints, and relationships as defined
 in app/models/*.py.
 """
+
 import pytest
 import bcrypt
 from sqlalchemy.exc import IntegrityError
@@ -20,7 +21,9 @@ class TestUserModel:
     def test_create_user(self, db, app):
         with app.app_context():
             user = User(name="Test User", email="test@example.com")
-            user.password = bcrypt.hashpw(b"password123", bcrypt.gensalt(12)).decode("utf-8")
+            user.password = bcrypt.hashpw(b"password123", bcrypt.gensalt(12)).decode(
+                "utf-8"
+            )
             db.session.add(user)
             db.session.commit()
 
@@ -66,11 +69,15 @@ class TestOAuthAccountModel:
             db.session.add(user)
             db.session.flush()
 
-            link = OAuthAccount(user_id=user.user_id, provider="google", provider_user_id="google_123")
+            link = OAuthAccount(
+                user_id=user.user_id, provider="google", provider_user_id="google_123"
+            )
             db.session.add(link)
             db.session.commit()
 
-            saved = OAuthAccount.query.filter_by(provider="google", provider_user_id="google_123").first()
+            saved = OAuthAccount.query.filter_by(
+                provider="google", provider_user_id="google_123"
+            ).first()
             assert saved is not None
             assert saved.user_id == user.user_id
 
@@ -84,10 +91,18 @@ class TestOAuthAccountModel:
             db.session.add_all([user1, user2])
             db.session.flush()
 
-            db.session.add(OAuthAccount(user_id=user1.user_id, provider="google", provider_user_id="same_id"))
+            db.session.add(
+                OAuthAccount(
+                    user_id=user1.user_id, provider="google", provider_user_id="same_id"
+                )
+            )
             db.session.commit()
 
-            db.session.add(OAuthAccount(user_id=user2.user_id, provider="google", provider_user_id="same_id"))
+            db.session.add(
+                OAuthAccount(
+                    user_id=user2.user_id, provider="google", provider_user_id="same_id"
+                )
+            )
             with pytest.raises(IntegrityError):
                 db.session.commit()
 
@@ -97,8 +112,16 @@ class TestOAuthAccountModel:
             db.session.add(user)
             db.session.flush()
 
-            db.session.add(OAuthAccount(user_id=user.user_id, provider="google", provider_user_id="123"))
-            db.session.add(OAuthAccount(user_id=user.user_id, provider="github", provider_user_id="123"))
+            db.session.add(
+                OAuthAccount(
+                    user_id=user.user_id, provider="google", provider_user_id="123"
+                )
+            )
+            db.session.add(
+                OAuthAccount(
+                    user_id=user.user_id, provider="github", provider_user_id="123"
+                )
+            )
             db.session.commit()  # must not raise
 
             assert OAuthAccount.query.filter_by(provider_user_id="123").count() == 2
@@ -111,7 +134,12 @@ class TestSessionModel:
             db.session.add(user)
             db.session.flush()
 
-            session_obj = Session(user_id=user.user_id, stack="Python", level="Básico", topic="General / Mixto")
+            session_obj = Session(
+                user_id=user.user_id,
+                stack="Python",
+                level="Básico",
+                topic="General / Mixto",
+            )
             db.session.add(session_obj)
             db.session.commit()
 
@@ -144,7 +172,9 @@ class TestQuestionModel:
             db.session.add(session_obj)
             db.session.flush()
 
-            question = Question(question="What is a decorator?", session_id=session_obj.session_id)
+            question = Question(
+                question="What is a decorator?", session_id=session_obj.session_id
+            )
             db.session.add(question)
             db.session.commit()
             db.session.refresh(question)
@@ -160,10 +190,14 @@ class TestCardModel:
             user = User(name="User", email="cardowner@example.com")
             db.session.add(user)
             db.session.flush()
-            session_obj = Session(user_id=user.user_id, stack="JavaScript", level="Básico")
+            session_obj = Session(
+                user_id=user.user_id, stack="JavaScript", level="Básico"
+            )
             db.session.add(session_obj)
             db.session.flush()
-            question = Question(question="Explain closures", session_id=session_obj.session_id)
+            question = Question(
+                question="Explain closures", session_id=session_obj.session_id
+            )
             db.session.add(question)
             db.session.flush()
 
@@ -198,8 +232,12 @@ class TestCardModel:
             db.session.flush()
 
             card = Card(
-                question_id=question.question_id, session_id=session_obj.session_id, user_id=user.user_id,
-                concept="X", explanation="Y", use_case="Z",
+                question_id=question.question_id,
+                session_id=session_obj.session_id,
+                user_id=user.user_id,
+                concept="X",
+                explanation="Y",
+                use_case="Z",
             )
             db.session.add(card)
             db.session.commit()

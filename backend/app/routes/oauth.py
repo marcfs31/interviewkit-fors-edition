@@ -25,7 +25,9 @@ _OAUTH_CODE_SALT = "oauth-login-exchange"
 
 
 def _code_serializer():
-    return URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt=_OAUTH_CODE_SALT)
+    return URLSafeTimedSerializer(
+        current_app.config["SECRET_KEY"], salt=_OAUTH_CODE_SALT
+    )
 
 
 def _normalize_email(email):
@@ -142,8 +144,12 @@ def exchange_code():
     user = db.session.get(User, uid)
 
     expires_delta = current_app.config["JWT_ACCESS_TOKEN_EXPIRES"]
-    access_token = create_access_token(identity=str(user.user_id), expires_delta=expires_delta)
-    response = jsonify({"user_id": user.user_id, "name": user.name, "token": access_token})
+    access_token = create_access_token(
+        identity=str(user.user_id), expires_delta=expires_delta
+    )
+    response = jsonify(
+        {"user_id": user.user_id, "name": user.name, "token": access_token}
+    )
     return response, 200
 
 
@@ -181,7 +187,9 @@ def google_callback():
 
         google_id = str(userinfo["sub"])
         # `is True`: only an explicit boolean from Google vouches for the address.
-        email = userinfo.get("email") if userinfo.get("email_verified") is True else None
+        email = (
+            userinfo.get("email") if userinfo.get("email_verified") is True else None
+        )
         if not email:
             email = f"google_{google_id}@users.noreply.google.com"
         name = userinfo.get("name", email.split("@")[0]) or f"Google User {google_id}"
@@ -196,9 +204,9 @@ def google_callback():
         if user is None:
             frontend_url = current_app.config["FRONTEND_URL"]
             return redirect(f"{frontend_url}/login?error=email_exists")
-        
+
         return _build_login_response(user)
-    
+
     except Exception as e:
         current_app.logger.exception("google callback unhandled error: %s", e)
         frontend_url = current_app.config["FRONTEND_URL"]
@@ -230,7 +238,11 @@ def github_callback():
         profile = resp.json()
 
         github_id = str(profile["id"])
-        name = profile.get("name") or profile.get("login", "") or f"GitHub User {github_id}"
+        name = (
+            profile.get("name")
+            or profile.get("login", "")
+            or f"GitHub User {github_id}"
+        )
         verified_emails = []
         primary_email = None
 
@@ -247,7 +259,11 @@ def github_callback():
         # The profile email is a free-text claim: trust it only if GitHub also
         # lists it as a verified address.
         profile_email = profile.get("email")
-        if not primary_email and profile_email and _normalize_email(profile_email) in verified_emails:
+        if (
+            not primary_email
+            and profile_email
+            and _normalize_email(profile_email) in verified_emails
+        ):
             primary_email = profile_email
 
         email = primary_email
@@ -266,7 +282,7 @@ def github_callback():
             return redirect(f"{frontend_url}/login?error=email_exists")
 
         return _build_login_response(user)
-    
+
     except Exception as e:
         current_app.logger.exception("github callback unhandled error: %s", e)
         frontend_url = current_app.config["FRONTEND_URL"]

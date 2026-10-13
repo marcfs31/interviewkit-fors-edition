@@ -39,7 +39,9 @@ def _warn_if_limits_are_per_process(app):
     """With memory:// every gunicorn worker (and every machine) counts on its
     own and a restart zeroes the counters, so the real limits are looser than
     the declared ones. Only worth saying in production."""
-    if app.config.get("FLASK_ENV") == "production" and app.config["RATELIMIT_STORAGE_URI"].startswith("memory://"):
+    if app.config.get("FLASK_ENV") == "production" and app.config[
+        "RATELIMIT_STORAGE_URI"
+    ].startswith("memory://"):
         logger.warning(
             "RATELIMIT_STORAGE_URI is not set: rate limits are per process and reset "
             "when the machine stops. Set a shared storage (e.g. redis://...) to enforce them globally."
@@ -99,7 +101,11 @@ def create_app():
 
     @app.errorhandler(429)
     def _rate_limit_exceeded(e):
-        return jsonify({"error": "Has alcanzado el limite de peticiones. Intentalo de nuevo mas tarde."}), 429
+        return jsonify(
+            {
+                "error": "Has alcanzado el limite de peticiones. Intentalo de nuevo mas tarde."
+            }
+        ), 429
 
     @app.errorhandler(413)
     def _payload_too_large(e):
@@ -121,7 +127,9 @@ def create_app():
         if not request.get_data().strip():
             return None
         if not isinstance(request.get_json(silent=True), dict):
-            return jsonify({"error": "El cuerpo de la peticion debe ser un objeto JSON valido"}), 400
+            return jsonify(
+                {"error": "El cuerpo de la peticion debe ser un objeto JSON valido"}
+            ), 400
         return None
 
     from .models.user import User
@@ -142,14 +150,15 @@ def create_app():
 
     # OAuth: only register providers whose credentials are actually configured
     has_oauth_provider = (
-        (app.config.get("GOOGLE_CLIENT_ID") and app.config.get("GOOGLE_CLIENT_SECRET"))
-        or (app.config.get("GITHUB_CLIENT_ID") and app.config.get("GITHUB_CLIENT_SECRET"))
-    )
+        app.config.get("GOOGLE_CLIENT_ID") and app.config.get("GOOGLE_CLIENT_SECRET")
+    ) or (app.config.get("GITHUB_CLIENT_ID") and app.config.get("GITHUB_CLIENT_SECRET"))
 
     if has_oauth_provider:
         oauth.init_app(app)
 
-        if app.config.get("GOOGLE_CLIENT_ID") and app.config.get("GOOGLE_CLIENT_SECRET"):
+        if app.config.get("GOOGLE_CLIENT_ID") and app.config.get(
+            "GOOGLE_CLIENT_SECRET"
+        ):
             oauth.register(
                 name="google",
                 client_id=app.config["GOOGLE_CLIENT_ID"],
@@ -158,7 +167,9 @@ def create_app():
                 client_kwargs={"scope": "openid email profile"},
             )
 
-        if app.config.get("GITHUB_CLIENT_ID") and app.config.get("GITHUB_CLIENT_SECRET"):
+        if app.config.get("GITHUB_CLIENT_ID") and app.config.get(
+            "GITHUB_CLIENT_SECRET"
+        ):
             oauth.register(
                 name="github",
                 client_id=app.config["GITHUB_CLIENT_ID"],
@@ -168,7 +179,6 @@ def create_app():
                 api_base_url="https://api.github.com/",
                 client_kwargs={"scope": "user:email"},
             )
-
 
     # CORS: allowed origins depend on the environment.
     # In dev, if CORS_ORIGINS is empty, fall back to localhost:3000.
@@ -192,7 +202,6 @@ def create_app():
         max_age=3600,
     )
 
-
     # The API only serves JSON and redirects, so a fully closed CSP is safe.
     # HSTS is production-only: plain-HTTP development must keep working.
     is_production = app.config.get("FLASK_ENV") == "production"
@@ -202,9 +211,13 @@ def create_app():
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'none'; frame-ancestors 'none'"
+        )
         if is_production:
-            response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=63072000; includeSubDomains"
+            )
         return response
 
     app.register_blueprint(auth)
@@ -218,6 +231,7 @@ def create_app():
     # Allowlist: any other value (a typo, a new env) leaves /debug off.
     if Config.FLASK_ENV in ("development", "test"):
         from .routes.debug import debug
+
         app.register_blueprint(debug)
 
     return app

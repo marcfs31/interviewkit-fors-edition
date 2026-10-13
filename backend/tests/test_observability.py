@@ -1,6 +1,7 @@
 """
 Tests for /health, the logging setup and the opt-in Sentry init.
 """
+
 import logging
 import re
 
@@ -23,7 +24,9 @@ class TestHealth:
     def test_is_not_rate_limited(self, client):
         assert all(client.get("/health").status_code == 200 for _ in range(60))
 
-    def test_returns_503_without_details_when_the_database_fails(self, client, db, monkeypatch, caplog):
+    def test_returns_503_without_details_when_the_database_fails(
+        self, client, db, monkeypatch, caplog
+    ):
         def boom(*args, **kwargs):
             raise RuntimeError("secret-host:5432 refused the connection")
 
@@ -68,7 +71,9 @@ def clean_root_logger():
 
 
 class TestConfigureLogging:
-    def test_defaults_to_info_with_timestamp_and_logger_name(self, clean_root_logger, monkeypatch):
+    def test_defaults_to_info_with_timestamp_and_logger_name(
+        self, clean_root_logger, monkeypatch
+    ):
         monkeypatch.delenv("LOG_LEVEL", raising=False)
         root = clean_root_logger()
 
@@ -79,7 +84,9 @@ class TestConfigureLogging:
         fmt = handler.formatter._fmt
         assert "%(asctime)s" in fmt and "%(name)s" in fmt
 
-    def test_level_comes_from_log_level_case_insensitive(self, clean_root_logger, monkeypatch):
+    def test_level_comes_from_log_level_case_insensitive(
+        self, clean_root_logger, monkeypatch
+    ):
         monkeypatch.setenv("LOG_LEVEL", "debug")
         root = clean_root_logger()
 
@@ -88,7 +95,9 @@ class TestConfigureLogging:
         assert root.level == logging.DEBUG
 
     @pytest.mark.parametrize("value", ["nope", "", "  "])
-    def test_invalid_level_falls_back_to_info(self, clean_root_logger, monkeypatch, value):
+    def test_invalid_level_falls_back_to_info(
+        self, clean_root_logger, monkeypatch, value
+    ):
         monkeypatch.setenv("LOG_LEVEL", value)
         root = clean_root_logger()
 
@@ -96,7 +105,9 @@ class TestConfigureLogging:
 
         assert root.level == logging.INFO
 
-    def test_does_not_stack_handlers_when_the_root_already_has_one(self, clean_root_logger, monkeypatch):
+    def test_does_not_stack_handlers_when_the_root_already_has_one(
+        self, clean_root_logger, monkeypatch
+    ):
         monkeypatch.delenv("LOG_LEVEL", raising=False)
         root = clean_root_logger()
         existing = logging.NullHandler()
@@ -112,7 +123,9 @@ class TestSentry:
     def test_not_initialized_without_a_dsn(self, monkeypatch):
         calls = []
         monkeypatch.delenv("SENTRY_DSN", raising=False)
-        monkeypatch.setattr("app.sentry_sdk.init", lambda **kwargs: calls.append(kwargs))
+        monkeypatch.setattr(
+            "app.sentry_sdk.init", lambda **kwargs: calls.append(kwargs)
+        )
 
         _init_sentry()
 
@@ -121,7 +134,9 @@ class TestSentry:
     def test_blank_dsn_counts_as_missing(self, monkeypatch):
         calls = []
         monkeypatch.setenv("SENTRY_DSN", "")
-        monkeypatch.setattr("app.sentry_sdk.init", lambda **kwargs: calls.append(kwargs))
+        monkeypatch.setattr(
+            "app.sentry_sdk.init", lambda **kwargs: calls.append(kwargs)
+        )
 
         _init_sentry()
 
@@ -130,7 +145,9 @@ class TestSentry:
     def test_initialized_without_pii_nor_request_bodies(self, monkeypatch):
         calls = []
         monkeypatch.setenv("SENTRY_DSN", "https://key@o0.ingest.sentry.io/1")
-        monkeypatch.setattr("app.sentry_sdk.init", lambda **kwargs: calls.append(kwargs))
+        monkeypatch.setattr(
+            "app.sentry_sdk.init", lambda **kwargs: calls.append(kwargs)
+        )
 
         _init_sentry()
 
